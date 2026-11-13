@@ -22,6 +22,8 @@ END {
 	} else if (single != 1 || single_name != "CONFIG_TARGET_airoha_an7581_DEVICE_fiberhome_hg5585f-ct") fail("expected only HG5585F CT")
 	count=split("CONFIG_KERNEL_NET_AIROHA_NPU_HG5585F CONFIG_KERNEL_NET_AIROHA_PPE_HG5585F CONFIG_KERNEL_NET_AIROHA_WED CONFIG_PACKAGE_MT7915_NPU_RX CONFIG_PACKAGE_MT7915_NPU_PROBE CONFIG_PACKAGE_hg5585f-offload-tools CONFIG_PACKAGE_kmod-mt7915e CONFIG_PACKAGE_kmod-mt7916-firmware CONFIG_PACKAGE_kmod-mac80211 CONFIG_PACKAGE_MAC80211_DEBUGFS CONFIG_KERNEL_DEBUG_FS CONFIG_PACKAGE_MT7915_NPU_RX_BACKEND CONFIG_PACKAGE_airoha-hg5585f-npu-firmware", keys, " ")
 	for (i=1;i<=count;i++) required(keys[i])
+	required("CONFIG_PACKAGE_luci-theme-carbon")
+	if (value["CONFIG_PACKAGE_luci-theme-argon"] == "y") fail("Argon theme must be disabled")
 	if (value["CONFIG_KERNEL_NET_AIROHA_WLAN_DIAG"] == "y") fail("register-only diagnostics conflicts with active WED; use offload_status")
 	if (errors) exit 1
 	print "PASS: HG5585F CT, NPU RX/reorder, host PPE, WED TX, diagnostics and installed dependencies enabled"
