@@ -333,7 +333,7 @@ jobs:
       if: success() && steps.compile.outputs.status == 'success'
       uses: actions/upload-artifact@v4
       with:
-        name: bin
+        name: firmware-${{ github.run_number }}
         path: openwrt/bin/targets/airoha/an7581/*.itb
         if-no-files-found: error
 

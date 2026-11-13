@@ -28,7 +28,7 @@ Actions 的 **FiberHome HG5585F CT Builder** 流程：
 2. `diy-part1.sh` 在 feeds 更新前按 `series` 应用五组补丁，并核对/安装 NPU 固件。
 3. 更新、安装 feeds，复制根目录 `.config`，执行 `diy-part2.sh` 检查 CT 选择。
 4. `make defconfig` 后再次核对 CT 及全部功能/驱动依赖，再下载和编译，并校验最终 ITB 的默认设备树。
-5. 成功后仅上传 `openwrt/bin/targets/airoha/an7581/*.itb`，Actions 下载包名为 **bin**。找不到固件会失败；不发布 Release。Actions 运行记录自动保留最近 7 次。
+5. 成功后仅上传 `openwrt/bin/targets/airoha/an7581/*.itb`，Actions 下载包名为 **firmware-构建版本号**，例如 `firmware-23`。找不到固件会失败；不发布 Release。Actions 运行记录自动保留最近 7 次。
 
 补丁验证基线是 `d9dd3a49f7bb7661c01e9c57c9e2aac2a1114b3e`。源码跟随 master，未来更新冲突时应用脚本会停止，不清理或强行覆盖工作区。
 整套补丁已应用时重复执行会跳过；部分应用或存在冲突会报错。
