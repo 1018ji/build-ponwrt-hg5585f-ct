@@ -1,7 +1,6 @@
 # FiberHome HG5585F CT PonWrt 构建工程
 
 源码使用 [1018ji/ponwrt](https://github.com/1018ji/ponwrt) 的 `master` 分支。
-根目录 `.config` 仅选择 **HG5585F CT**。本工程只在独立编译副本上打补丁，不修改旁边的参考源码 `../ponwrt`。
 
 ## 文件结构
 
@@ -29,7 +28,7 @@ Actions 的 **FiberHome HG5585F CT Builder** 流程：
 2. `diy-part1.sh` 在 feeds 更新前按 `series` 应用五组补丁，并核对/安装 NPU 固件。
 3. 更新、安装 feeds，复制根目录 `.config`，执行 `diy-part2.sh` 检查 CT 选择。
 4. `make defconfig` 后再次核对 CT 及全部功能/驱动依赖，再下载和编译，并校验最终 ITB 的默认设备树。
-5. 成功后仅上传 `openwrt/bin/targets/airoha/an7581/*.itb`，Actions 下载包名为 **bin**。找不到固件会失败；不发布 Release。
+5. 成功后仅上传 `openwrt/bin/targets/airoha/an7581/*.itb`，Actions 下载包名为 **bin**。找不到固件会失败；不发布 Release。Actions 运行记录自动保留最近 7 次。
 
 补丁验证基线是 `d9dd3a49f7bb7661c01e9c57c9e2aac2a1114b3e`。源码跟随 master，未来更新冲突时应用脚本会停止，不清理或强行覆盖工作区。
 整套补丁已应用时重复执行会跳过；部分应用或存在冲突会报错。
@@ -79,16 +78,22 @@ CONFIG_PACKAGE_hg5585f-offload-tools=y
 | 重新编译 | 恢复 | 不恢复 | 重新构建后保存 |
 | 不使用缓存 | 不恢复 | 不恢复 | 不保存、不清理 |
 
-缓存分为 `dl`、host/tools/toolchain、`.ccache` 三层，采用 HG5585F CT 专用前缀。
-工具链只接受精确匹配：缓存键包含实际打补丁后的相关源码、CPU/编译器/库及内核配置，
-不复用不匹配的旧工具链。ccache 按编译器内容校验，容量 3G。
+缓存分为 `dl`、host/tools、toolchain、`.ccache` 四层，采用 HG5585F CT 专用前缀。
+tools 和 toolchain 分别保存、只接受精确匹配；更新编译器或 libc 时可以继续复用 tools。
+缓存键读取实际打补丁后的源码、make 使用的配置和 runner 主机编译器信息。
+工具链额外跟踪 tools 指纹、CPU/ABI、编译器、库、内核版本/哈希、通用内核补丁和头文件输入。
+普通 WED/NPU 驱动开关及 `config/` 中无关的 Kconfig 声明不再单独使工具链失效。
+ccache 按编译器内容校验，容量固定 3G。
 这套缓存机制来自参考构建工程；GitHub 的缓存属于各自仓库，首次在本仓库运行时需自行建立缓存。
 
 `CONFIG_DEVEL`、`CONFIG_CCACHE` 只在临时编译副本按模式启用，根 `.config` 保留原样。
-工具链构建成功后立即保存；固件失败时也会尝试保存非空 ccache，不保存失败/未开始的工具链。
+tools 和工具链各自构建成功后立即保存；后续阶段失败时已完成的层仍可复用。
+固件失败时也会尝试保存含实际编译结果的 ccache，不保存失败/未开始的工具链。
 同一工作流串行运行，每类缓存只在本次成功保存新缓存后清理旧项；只读和禁用模式不会修改远程缓存。
 缓存恢复、保存或维护失败不会阻止正常编译及 ITB 下载包上传。
 固件编译设有时间上限，在 runner 六小时上限前预留约 20 分钟用于保存已有编译缓存。
+拆分后的 tools/toolchain 使用 v2 缓存键，首次需要建立新缓存；原下载缓存和 ccache 仍可复用。
+新层保存成功后才清理旧合并工具链缓存。GitHub 仓库缓存额度和付费设置不作调整。
 
 ## 固件输入
 
