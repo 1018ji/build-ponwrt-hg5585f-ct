@@ -1,0 +1,612 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] HG5585F passive startup checks and log collector
+
+Apply this patch to the PonWrt root before feeds and package preparation.
+
+---
+--- /dev/null
++++ b/package/utils/hg5585f-offload-tools/Makefile
+@@ -0,0 +1,38 @@
++include $(TOPDIR)/rules.mk
++
++PKG_NAME:=hg5585f-offload-tools
++PKG_RELEASE:=1
++PKG_LICENSE:=GPL-2.0-only
++PKGARCH:=all
++
++include $(INCLUDE_DIR)/package.mk
++
++define Package/hg5585f-offload-tools
++  SECTION:=utils
++  CATEGORY:=Utilities
++  TITLE:=HG5585F passive NPU and WED checks
++  DEPENDS:=@TARGET_airoha_an7581 +kmod-mt7915e +@PACKAGE_MAC80211_DEBUGFS
++endef
++
++define Package/hg5585f-offload-tools/description
++  Read-only startup checks and bounded diagnostic collection for HG5585F
++  NPU receive and WED transmit. Does not enable offload, generate traffic
++  or trigger device recovery. Requires the matching offload_status driver.
++endef
++
++define Package/hg5585f-offload-tools/conffiles
++/etc/config/hg5585f-offload-check
++endef
++
++define Build/Compile
++endef
++
++define Package/hg5585f-offload-tools/install
++	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/libexec $(1)/etc/init.d $(1)/etc/config
++	$(INSTALL_BIN) ./files/hg5585f-offload-check $(1)/usr/sbin/
++	$(INSTALL_DATA) ./files/offload-report.awk $(1)/usr/libexec/hg5585f-offload-report.awk
++	$(INSTALL_BIN) ./files/hg5585f-offload-check.init $(1)/etc/init.d/hg5585f-offload-check
++	$(INSTALL_CONF) ./files/hg5585f-offload-check.config $(1)/etc/config/hg5585f-offload-check
++endef
++
++$(eval $(call BuildPackage,hg5585f-offload-tools))
+--- /dev/null
++++ b/package/utils/hg5585f-offload-tools/README.md
+@@ -0,0 +1,88 @@
++# HG5585F 开机自检和日志采集
++
++可选包 `hg5585f-offload-tools` 提供开机服务和命令
++`hg5585f-offload-check`，用于当前 WED TX、NPU RX/重排序及 Linux 转发模式。
++需要本仓库 mt76 补丁 131 提供的 `offload_status`；不需要启用 `npu_probe` 参数。
++
++工具只读取状态，并在 `/tmp` 创建报告。它不会启用加速、挂载 debugfs、写寄存器、
++清空计数或日志、修改网络配置、产生测试流量或触发驱动恢复。
++
++## 手动检查
++
++```sh
++hg5585f-offload-check --expect combined
++```
++
++选择当前应运行的模式：`native`、`rx`、`wed`、`combined`。
++默认 `auto` 根据设备树和驱动请求状态判断。明确指定 `--expect` 可发现启动了错误的 FIT 配置。
++
++默认间隔 3 秒采集两次，输出文本、JSON 和权限受限的 `.tar.gz` 日志包。
++命令会打印准确路径，例如 `/tmp/hg5585f-offload.ABC123.tar.gz`。
++使用 `--output /tmp/my-offload-report` 可指定一个尚不存在的报告目录；不会覆盖已有目录。
++
++在已有用户流量时，可要求观察到两个方向的推进：
++
++```sh
++hg5585f-offload-check --expect combined --require-traffic --interval 5 --samples 3
++```
++
++命令本身不会发包。无流量不等于硬件故障。
++
++| 结果 | 含义 | 退出码 |
++| --- | --- | --- |
++| `PASS` | 请求的路径已就绪，且采样中都观察到对应计数推进 | 0 |
++| `READY` | 路径已就绪，但没有观察到全部所需方向的流量 | 0 |
++| `SKIP` | 匹配的驱动明确报告原生模式，没有请求加速 | 0 |
++| `WARN` | 数据缺失、读取超时、恢复跨过采样窗口、计数不可读或日志中有异常证据 | 2 |
++| `FAIL` | 请求的后端未挂接、选错模式、WED 参数关闭、队列停止或 DMA 已被隔离 | 1 |
++
++参数错误退出 64，报告写入失败退出 73。报告完成时存在 `complete` 文件，
++文本报告为 `report.txt`，机器可读结果为 `summary.json`。
++
++## 开机检查
++
++安装可选包后，`/etc/init.d/hg5585f-offload-check` 在启动阶段执行一次检查，
++最多等待驱动 60 秒，再采两次快照。不设置 respawn，不循环重启驱动或服务。
++报告路径和结论写入系统服务日志；数据保存在 `/tmp`，重启后不保留。
++
++配置文件 `/etc/config/hg5585f-offload-check`：
++
++```text
++config check 'main'
++        option enabled '1'
++        option expect 'auto'
++        option wait '60'
++        option interval '3'
++        option samples '2'
++        option require_traffic '0'
++```
++
++`enabled=0` 可关闭检查。也可以手动执行
++`/etc/init.d/hg5585f-offload-check restart` 重新采集。
++
++## 采集和判定范围
++
++- 状态：请求的模式、后端挂接、接收队列、停止/隔离标志和恢复状态。
++- NPU：返回 Linux 的完整帧数及主机交付丢弃计数。计数按 NAPI 批次更新。
++- WED：使用已核对的两个 TX MIB；在停机、恢复、隔离或 read-clear 模式下不读取 MIB。
++- 恢复：通过驱动实例标识及 WM/WA 重置次数识别重新加载和恢复；跨越恢复时省略流量差值。
++- 原始证据：每次的内核日志尾部、CPU、IRQ、内存、模块、网络设备计数，以及系统版本和设备树模式。
++
++每次读取有超时限制，每个原始文件最多约 128 KiB。缺少 `timeout`、debugfs 未挂载或
++运行旧驱动时会保留可用信息并报告观测不足，不会自动调整系统。
++包会选择 MT7915 驱动和 mac80211 debugfs 支持；仍需要使用匹配的驱动构建。
++
++两个 PHY 可能显示同一个控制器的计数，通过 `instance` 识别；不能把它们相加。
++32 位计数按相邻快照计算回绕差值。NPU 主机交付计数与 WED MIB 的计量单位不同，
++它们只证明对应通道有推进，不证明无线 ACK、端到端吞吐或完整 RX→PPE 转发已经正确。
++工具能观察恢复及恢复后的状态，不会主动进行重置试验。
++
++## 单独复制或离线分析
++
++可把 `files/hg5585f-offload-check` 与 `files/offload-report.awk`
++放在设备同一个目录，用 `sh ./hg5585f-offload-check` 运行。
++脚本优先使用同目录的 AWK 文件。支持 BusyBox ash/awk，不依赖 Python、jq 或完整 GNU 工具集。
++
++开发验证可用 `--root DIRECTORY` 指向包含 `proc/`、`sys/` 和可选 `dmesg.txt` 的离线目录。
++此时不会读取运行脚本所在主机的内核日志。目录中的输入保持只读；报告另建目录。
++路径支持空格，不支持换行。
+--- /dev/null
++++ b/package/utils/hg5585f-offload-tools/files/hg5585f-offload-check
+@@ -0,0 +1,247 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-2.0-only
++
++umask 077
++expect=auto
++startup_wait=0
++interval=3
++samples=2
++require_traffic=0
++read_timeout=5
++archive=1
++fs_root=
++output=
++phy=
++
++usage() {
++	cat <<'EOF'
++Usage: hg5585f-offload-check [options]
++  --expect auto|native|rx|wed|combined  Expected mode (default: auto from DT)
++  --wait SECONDS                     Wait for driver readiness, 0..120
++  --interval SECONDS                 Counter sampling interval, 1..60
++  --samples COUNT                    Number of snapshots, 2..10
++  --require-traffic                  Warn if a required path does not advance
++  --phy NAME                         Restrict to one PHY, e.g. phy0
++  --output DIRECTORY                 Create a new private report directory
++  --root DIRECTORY                   Read an offline /proc and /sys fixture
++  --read-timeout SECONDS             Per-read limit, 1..10 (default: 5)
++  --no-archive                       Keep report directory without a tar.gz
++  --help
++
++No traffic, recovery, register writes, mounts or configuration changes are made.
++Exit: 0=PASS/READY/SKIP, 1=FAIL, 2=WARN, 64=invalid arguments, 73=report I/O error.
++EOF
++}
++
++bad_args() { printf '%s\n' "$*" >&2; exit 64; }
++need_value() {
++	if [ "$#" -lt 2 ] || [ -z "$2" ]; then bad_args "Missing value for $1"; fi
++}
++number() {
++	case "$2" in ''|*[!0-9]*|?????*) bad_args "Invalid $1: $2";; esac
++	if [ "$2" -lt "$3" ] || [ "$2" -gt "$4" ]; then bad_args "Out of range $1: $2"; fi
++}
++decimal() {
++	local value="$1"
++	while [ "${#value}" -gt 1 ] && [ "${value#0}" != "$value" ]; do value=${value#0}; done
++	printf '%s' "$value"
++}
++
++while [ "$#" -gt 0 ]; do
++	case "$1" in
++		--expect) need_value "$@"; expect=$2; shift 2;;
++		--wait) need_value "$@"; startup_wait=$2; shift 2;;
++		--interval) need_value "$@"; interval=$2; shift 2;;
++		--samples) need_value "$@"; samples=$2; shift 2;;
++		--phy) need_value "$@"; phy=$2; shift 2;;
++		--output) need_value "$@"; output=$2; shift 2;;
++		--root) need_value "$@"; fs_root=$2; shift 2;;
++		--read-timeout) need_value "$@"; read_timeout=$2; shift 2;;
++		--require-traffic) require_traffic=1; shift;;
++		--no-archive) archive=0; shift;;
++		--help|-h) usage; exit 0;;
++		*) bad_args "Unknown option: $1";;
++	esac
++done
++case "$expect" in auto|native|rx|wed|combined) ;; *) bad_args "Invalid expected mode: $expect";; esac
++case "$phy" in *[!a-zA-Z0-9_.-]*|.|..) bad_args "Invalid PHY name: $phy";; esac
++number wait "$startup_wait" 0 120
++number interval "$interval" 1 60
++number samples "$samples" 2 10
++number read-timeout "$read_timeout" 1 10
++startup_wait=$(decimal "$startup_wait")
++interval=$(decimal "$interval")
++samples=$(decimal "$samples")
++read_timeout=$(decimal "$read_timeout")
++path_nl='
++'
++path_cr=$(printf '\r')
++case "$fs_root$output" in *"$path_nl"*|*"$path_cr"*) bad_args 'Newlines are not supported in paths';; esac
++if [ -n "$fs_root" ]; then
++	fs_root=$(CDPATH='' cd -- "$fs_root" 2>/dev/null && pwd -P) || bad_args 'Offline root does not exist'
++	[ "$fs_root" = / ] && fs_root=
++fi
++report_awk=${HG5585F_REPORT_AWK:-}
++if [ -z "$report_awk" ]; then
++	script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P) || exit 73
++	report_awk=$script_dir/offload-report.awk
++	[ -r "$report_awk" ] || report_awk=/usr/libexec/hg5585f-offload-report.awk
++fi
++[ -r "$report_awk" ] || bad_args 'Missing offload-report.awk'
++
++if [ -z "$output" ]; then
++	output=$(mktemp -d /tmp/hg5585f-offload.XXXXXX) || exit 73
++else
++	mkdir -m 700 -- "$output" 2>/dev/null || { printf 'Cannot create new report directory: %s\n' "$output" >&2; exit 73; }
++	output=$(CDPATH='' cd -- "$output" && pwd -P) || exit 73
++fi
++printf 'Report: %s\n' "$output"
++trap 'printf "Interrupted\n" >&2; exit 130' INT
++trap 'printf "Interrupted\n" >&2; exit 143' TERM
++
++have_timeout=0
++command -v timeout >/dev/null 2>&1 && have_timeout=1
++printf 'format=1\nexpected=%s\nsamples=%s\ninterval=%s\nroot=%s\n' \
++	"$expect" "$samples" "$interval" "${fs_root:-/}" > "$output/run.txt"
++
++# The caller provides the destination; inputs are never opened for writing.
++capture() {
++	local dest="$1" input="$2" reader="${3:-head}" rc
++	if [ ! -r "$input" ]; then
++		printf 'unavailable: %s\n' "$input" > "$dest.stderr"
++		return 1
++	fi
++	if [ "$have_timeout" != 1 ]; then
++		printf 'timeout command unavailable; bounded read skipped\n' > "$dest.stderr"
++		return 1
++	fi
++	timeout "$read_timeout" "$reader" -c 131072 "$input" > "$dest" 2> "$dest.stderr"
++	rc=$?
++	if [ "$reader" = head ] && [ "$rc" = 0 ] && [ "$(wc -c < "$dest")" -ge 131072 ]; then
++		printf 'Capture size limit reached\n' >> "$dest.stderr"
++		rc=125
++	fi
++	printf '%s\n' "$rc" > "$dest.exit"
++	return "$rc"
++}
++
++status_paths() {
++	local file name
++	for file in "$fs_root"/sys/kernel/debug/ieee80211/*/mt76/offload_status; do
++		[ -e "$file" ] || continue
++		name=${file%/mt76/offload_status}; name=${name##*/}
++		[ -z "$phy" ] || [ "$name" = "$phy" ] || continue
++		case "$name" in ''|*[!a-zA-Z0-9_.-]*) continue;; esac
++		printf '%s\n' "$file"
++	done
++}
++
++mkdir -m 700 "$output/system" || exit 73
++for item in etc/openwrt_release etc/os-release sys/firmware/devicetree/base/model \
++	sys/firmware/devicetree/base/compatible sys/module/mt7915e/srcversion sys/module/mt76/srcversion; do
++	name=$(printf '%s' "$item" | tr / _)
++	capture "$output/system/$name.txt" "$fs_root/$item" || :
++done
++
++dt_known=0 dt_rx=0 dt_wed=0
++dt_root=$fs_root/sys/firmware/devicetree/base
++if [ -d "$dt_root" ]; then
++	dt_known=1
++	# Only property names are inspected; EEPROM and configuration are not read.
++	find "$dt_root" -name 'airoha,hg5585f-rx-offload' > "$output/dt-rx-paths.txt" 2> "$output/dt-find.stderr"
++	find "$dt_root" -name 'airoha,wed' > "$output/dt-wed-paths.txt" 2>> "$output/dt-find.stderr"
++	[ ! -s "$output/dt-find.stderr" ] || dt_known=0
++	[ ! -s "$output/dt-rx-paths.txt" ] || dt_rx=1
++	[ ! -s "$output/dt-wed-paths.txt" ] || dt_wed=1
++fi
++
++if [ "$startup_wait" -gt 0 ] && [ "$have_timeout" = 1 ]; then
++	deadline=$(( $(date +%s) + startup_wait ))
++	while [ "$(date +%s)" -lt "$deadline" ]; do
++		ready=0
++		status_paths > "$output/startup-paths.txt"
++		while IFS= read -r file; do
++			remaining=$((deadline - $(date +%s)))
++			[ "$remaining" -gt 0 ] || break
++			probe_timeout=$read_timeout
++			[ "$remaining" -ge "$read_timeout" ] || read_timeout=$remaining
++			if capture "$output/startup-status.txt" "$file" && awk -F ': *' -v mode="$expect" -v known="$dt_known" -v dtr="$dt_rx" -v dtw="$dt_wed" '
++				$1=="format" {f=$2} $1=="expected_rx" {r=$2} $1=="expected_wed" {w=$2}
++				$1=="rx_configured" {rc=$2} $1=="tx_running" {tc=$2}
++				END {
++					if (mode=="auto") {nr=known?dtr:r; nw=known?dtw:w}
++					else {nr=mode=="rx" || mode=="combined"; nw=mode=="wed" || mode=="combined"}
++					exit !(f==1 && (!nr || (r==1 && rc==1)) && (!nw || (w==1 && tc==1)))
++				}
++			' "$output/startup-status.txt"; then ready=1; fi
++			read_timeout=$probe_timeout
++			[ "$ready" = 0 ] || break
++		done < "$output/startup-paths.txt"
++		[ "$ready" = 0 ] || break
++		[ "$(date +%s)" -lt "$deadline" ] || break
++		sleep 1
++	done
++fi
++
++sample=1
++while [ "$sample" -le "$samples" ]; do
++	base=$output/sample-$sample
++	mkdir -m 700 "$base" "$base/status" "$base/proc" "$base/logs" || exit 73
++	for item in uptime stat interrupts modules meminfo version net/dev sys/kernel/random/boot_id; do
++		name=$(printf '%s' "$item" | tr / _)
++		capture "$base/proc/$name.txt" "$fs_root/proc/$item" || :
++	done
++	capture "$base/wed-enable.txt" "$fs_root/sys/module/mt7915e/parameters/wed_enable" || :
++	status_paths > "$base/status-paths.txt"
++	while IFS= read -r file; do
++		name=${file%/mt76/offload_status}; name=${name##*/}
++		if ! capture "$base/status/$name.txt" "$file"; then
++			[ ! -f "$base/status/$name.txt" ] || mv "$base/status/$name.txt" "$base/status/$name.partial"
++			printf 'capture_error: 1\n' > "$base/status/$name.txt"
++		fi
++	done < "$base/status-paths.txt"
++	if [ -n "$fs_root" ]; then
++		capture "$base/logs/dmesg.txt" "$fs_root/dmesg.txt" tail || :
++	else
++		if [ "$have_timeout" = 1 ]; then
++			{
++				timeout "$read_timeout" dmesg
++				printf '%s\n' "$?" > "$base/logs/dmesg.exit"
++			} 2> "$base/logs/dmesg.stderr" | tail -c 131072 | tail -n 400 > "$base/logs/dmesg.txt"
++		fi
++	fi
++	[ "$sample" -eq "$samples" ] || sleep "$interval"
++	sample=$((sample + 1))
++done
++
++set --
++for file in "$output"/sample-*/status/*.txt; do
++	[ ! -f "$file" ] || set -- "$@" "$file"
++done
++for file in "$output"/sample-*/logs/dmesg.txt "$output"/sample-*/logs/dmesg.stderr \
++	"$output"/sample-*/logs/dmesg.exit "$output"/sample-*/wed-enable.txt; do
++	[ ! -f "$file" ] || set -- "$@" "$file"
++done
++# With no inputs, awk must receive /dev/null instead of waiting on stdin.
++[ "$#" -gt 0 ] || set -- /dev/null
++HG_EXPECT=$expect HG_DT_KNOWN=$dt_known HG_DT_RX=$dt_rx HG_DT_WED=$dt_wed \
++HG_REQUIRE_TRAFFIC=$require_traffic HG_SAMPLES=$samples HG_PHY=$phy HG_REPORT_DIR=$output \
++	awk -f "$report_awk" "$@" > "$output/report.txt"
++result=$?
++if [ "$result" -gt 2 ] || [ ! -s "$output/summary.json" ]; then
++	printf 'Report analysis failed\n' >&2
++	exit 73
++fi
++cat "$output/report.txt"
++printf '%s\n' "$result" > "$output/exit-code" || exit 73
++printf 'complete\n' > "$output/complete" || exit 73
++
++if [ "$archive" = 1 ] && command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1; then
++	parent=${output%/*}; name=${output##*/}
++	if (set -C; tar -cz -C "$parent" "$name" > "$output.tar.gz") 2> "$output/archive.stderr"; then
++		printf 'Archive: %s.tar.gz\n' "$output"
++	else
++		printf 'Archive unavailable; report directory retained\n' >&2
++	fi
++fi
++exit "$result"
+--- /dev/null
++++ b/package/utils/hg5585f-offload-tools/files/hg5585f-offload-check.config
+@@ -0,0 +1,7 @@
++config check 'main'
++	option enabled '1'
++	option expect 'auto'
++	option wait '60'
++	option interval '3'
++	option samples '2'
++	option require_traffic '0'
+--- /dev/null
++++ b/package/utils/hg5585f-offload-tools/files/hg5585f-offload-check.init
+@@ -0,0 +1,29 @@
++#!/bin/sh /etc/rc.common
++# SPDX-License-Identifier: GPL-2.0-only
++
++# rc.common consumes these two globals.
++# shellcheck disable=SC2034
++START=98
++# shellcheck disable=SC2034
++USE_PROCD=1
++
++start_service() {
++	local enabled expect wait interval samples require_traffic
++
++	config_load hg5585f-offload-check
++	config_get_bool enabled main enabled 1
++	[ "$enabled" = 1 ] || return 0
++	config_get expect main expect auto
++	config_get wait main wait 60
++	config_get interval main interval 3
++	config_get samples main samples 2
++	config_get_bool require_traffic main require_traffic 0
++
++	procd_open_instance
++	procd_set_param command /usr/sbin/hg5585f-offload-check \
++		--expect "$expect" --wait "$wait" --interval "$interval" --samples "$samples"
++	[ "$require_traffic" = 1 ] && procd_append_param command --require-traffic
++	procd_set_param stdout 1
++	procd_set_param stderr 1
++	procd_close_instance
++}
+--- /dev/null
++++ b/package/utils/hg5585f-offload-tools/files/offload-report.awk
+@@ -0,0 +1,179 @@
++# SPDX-License-Identifier: GPL-2.0-only
++# Input is passive driver snapshots. No shell commands are executed here.
++function trim(v) { sub(/^[ \t\r]+/, "", v); sub(/[ \t\r]+$/, "", v); return v }
++function note(level, text) {
++	print level ": " text
++	if (level == "FAIL") failures++
++	if (level == "WARN") warnings++
++	messages[++nm] = level ": " text
++}
++function quote(v,    i, c, out) {
++	out = "\""
++	for (i = 1; i <= length(v); i++) {
++		c = substr(v,i,1)
++		if (c == "\\") out = out "\\\\"
++		else if (c == "\"") out = out "\\\""
++		else if (c == "\r") out = out "\\r"
++		else if (c == "\n") out = out "\\n"
++		else if (c == "\t") out = out "\\t"
++		else out = out c
++	}
++	return out "\""
++}
++function u32(v) { return v ~ /^[0-9]+$/ && length(v) <= 10 && v + 0 <= 4294967295 }
++function delta(a, b) { return b >= a ? b - a : 4294967296 - a + b }
++function valid(s, p,    i, k, v) {
++	if (bad[s,p]) return 0
++	for (i = 1; i <= nr; i++) if (!((s SUBSEP p SUBSEP required[i]) in values)) return 0
++	if (values[s,p,"format"] != "1" || values[s,p,"counter_bits"] != "32") return 0
++	v = values[s,p,"instance"]
++	if (v !~ /^[0-9]+$/ || length(v) > 20 || v ~ /^0+$/) return 0
++	for (k in boolean) if (values[s,p,k] !~ /^[01]$/) return 0
++	for (k in counter) if (!u32(values[s,p,k])) return 0
++	if (values[s,p,"chip_id"] !~ /^[0-9a-f]+$/ || length(values[s,p,"chip_id"]) != 4) return 0
++	if (values[s,p,"rx_forwarding"] != "linux" && values[s,p,"rx_forwarding"] != "native") return 0
++	if ((values[s,p,"rx_legacy"] == "1") != (values[s,p,"rx_forwarding"] == "linux")) return 0
++	return values[s,p,"rx_queues"] ~ /^[012]$/ && values[s,p,"rx_stopped"] ~ /^[0-3]$/
++}
++function rx_mode(mode) { return mode == "rx" || mode == "combined" }
++function wed_mode(mode) { return mode == "wed" || mode == "combined" }
++function mode_name(rx, tx) { return rx ? (tx ? "combined" : "rx") : (tx ? "wed" : "native") }
++BEGIN {
++	if (ENVIRON["HG_REPORT_DIR"] == "") {fatal=1; print "Missing report directory" > "/dev/stderr"; exit 64}
++	expect = ENVIRON["HG_EXPECT"]; count = ENVIRON["HG_SAMPLES"] + 0
++	dt_known = ENVIRON["HG_DT_KNOWN"] + 0
++	dt_rx = ENVIRON["HG_DT_RX"] + 0; dt_wed = ENVIRON["HG_DT_WED"] + 0
++	require_traffic = ENVIRON["HG_REQUIRE_TRAFFIC"] + 0
++	json_file = ENVIRON["HG_REPORT_DIR"] "/summary.json"
++	nr = split("format instance chip_id expected_rx expected_wed rx_legacy rx_configured rx_failed rx_quarantined rx_queues rx_stopped rx_host_packets rx_host_errors tx_wed tx_airoha tx_running tx_quarantined tx_counters_valid tx_mib0 tx_mib1 counter_bits wm_reset_count wa_reset_count recovering rx_forwarding", required, " ")
++	n = split("expected_rx expected_wed rx_legacy rx_configured rx_failed rx_quarantined tx_wed tx_airoha tx_running tx_quarantined tx_counters_valid recovering", fields, " ")
++	for (i = 1; i <= n; i++) boolean[fields[i]] = 1
++	n = split("rx_host_packets rx_host_errors tx_mib0 tx_mib1 wm_reset_count wa_reset_count", fields, " ")
++	for (i = 1; i <= n; i++) counter[fields[i]] = 1
++}
++FILENAME ~ /\/logs\/dmesg\.exit$/ { if ($0 + 0 != 0) log_unavailable=1; next }
++FILENAME ~ /\/logs\/dmesg\.stderr$/ { if (trim($0) != "") log_unavailable=1; next }
++FILENAME ~ /\/logs\/dmesg\.txt$/ {
++	line = tolower($0)
++	if (line ~ /txcoherent|legacy npu.*(failed|retained)|wed.*(exception|reset did not complete)|npu.*watchdog|mt7915.*message.*timeout/ && !log_seen[$0]++) log_errors++
++	next
++}
++FILENAME ~ /\/wed-enable\.txt$/ {
++	line = trim($0)
++	if (line ~ /^(N|n|0)$/) parameter_disabled = 1
++	next
++}
++FILENAME ~ /\/status\/[^\/]+\.txt$/ {
++	if (FNR == 1) {
++		n = split(FILENAME, path, "/")
++		phy = path[n]; sub(/\.txt$/, "", phy)
++		sample = path[n-2]; sub(/^sample-/, "", sample); sample += 0
++		if (!(phy in have_phy)) { have_phy[phy] = 1; order[++np] = phy }
++		if (sample > last[phy]) last[phy] = sample
++		if (!first[phy] || sample < first[phy]) first[phy] = sample
++	}
++	pos = index($0, ":")
++	if (!pos) { bad[sample,phy] = 1; next }
++	key = trim(substr($0,1,pos-1)); value = trim(substr($0,pos+1))
++	if (key !~ /^[a-z0-9_]+$/ || ((sample SUBSEP phy SUBSEP key) in values)) bad[sample,phy] = 1
++	values[sample,phy,key] = value
++	next
++}
++END {
++	if (fatal) exit 64
++	print "HG5585F passive offload check"
++	print "RX counters count frames returned by NPU to Linux; WED MIBs count hardware progress."
++	print "Two PHY views may share one device instance. Their counters must not be added."
++	if (expect != "auto" && dt_known && (rx_mode(expect) != dt_rx || wed_mode(expect) != dt_wed))
++		note("FAIL", "Requested mode " expect " disagrees with selected device-tree mode " mode_name(dt_rx,dt_wed))
++	for (pi = 1; pi <= np; pi++) {
++		p = order[pi]; s = last[p]; b = first[p]
++		if (s != count) { note("WARN", p ": status disappeared before the final snapshot"); continue }
++		if (!valid(s,p)) { note("WARN", p ": incomplete, unreadable or unsupported status format"); continue }
++		if (values[s,p,"chip_id"] != "7906") { note("SKIP", p ": not an MT7916 view"); continue }
++		checked++
++		mode = expect == "auto" ? mode_name(values[s,p,"expected_rx"]+0,values[s,p,"expected_wed"]+0) : expect
++		r = rx_mode(mode); w = wed_mode(mode); needed += r + w
++		view[++nv] = p; view_mode[nv] = mode; view_instance[nv] = values[s,p,"instance"]
++		rx_delta[nv] = tx_delta[nv] = error_delta[nv] = "null"
++		print "VIEW " p ": mode=" mode ", instance=" values[s,p,"instance"] ", RX forwarding=" values[s,p,"rx_forwarding"]
++		if ((values[s,p,"rx_quarantined"]+0) || (values[s,p,"tx_quarantined"]+0)) note("FAIL", p ": DMA quarantined; resources retained, restart forbidden")
++		if ((values[s,p,"rx_failed"]+0)) note("FAIL", p ": NPU state synchronization failed")
++		if ((values[s,p,"rx_stopped"]+0)) note("FAIL", p ": an NPU host return queue is stopped")
++		if (r && !(values[s,p,"rx_legacy"]+0)) note("FAIL", p ": requested legacy RX backend is not attached")
++		if (w && (!(values[s,p,"tx_wed"]+0) || !(values[s,p,"tx_airoha"]+0))) note("FAIL", p ": requested Airoha WED provider is not attached")
++		if (r && (values[s,p,"rx_configured"]+0) && (values[s,p,"rx_queues"]+0) == 0) note("FAIL", p ": configured NPU RX has no host return queues")
++		if ((values[s,p,"recovering"]+0)) note("WARN", p ": recovery in progress; activity cannot be confirmed")
++		if (r && !(values[s,p,"rx_configured"]+0)) note("WARN", p ": NPU receive path is not configured or is quiesced")
++		if (w && (values[s,p,"tx_wed"]+0) && !(values[s,p,"tx_running"]+0)) note("WARN", p ": WED is attached but quiesced")
++		if (!r && !w) { note("SKIP", p ": native mode selected; no offload requested"); continue }
++		if (b == s || !valid(b,p)) { note("WARN", p ": no valid initial counter snapshot"); continue }
++		unstable = missing = rx_inactive = tx_unreadable = 0
++		for (t = b; t <= s; t++) {
++			if (!valid(t,p)) { missing=1; continue }
++			if (("i" values[t,p,"instance"]) != ("i" values[s,p,"instance"]) ||
++			    values[t,p,"wm_reset_count"] != values[s,p,"wm_reset_count"] ||
++			    values[t,p,"wa_reset_count"] != values[s,p,"wa_reset_count"] ||
++			    (values[t,p,"recovering"]+0)) unstable=1
++			if (t < s && ("i" values[t,p,"instance"]) == ("i" values[s,p,"instance"]) &&
++			    ((values[t,p,"rx_quarantined"]+0) || (values[t,p,"tx_quarantined"]+0)))
++				note("FAIL", p ": a terminal DMA fault was recorded in this driver instance")
++			if (t < s && ((values[t,p,"rx_failed"]+0) || (values[t,p,"rx_stopped"]+0))) unstable=1
++			if (!(values[t,p,"rx_configured"]+0)) rx_inactive=1
++			if (!(values[t,p,"tx_counters_valid"]+0) || !(values[t,p,"tx_running"]+0)) tx_unreadable=1
++		}
++		if (missing) { note("WARN", p ": an intermediate status snapshot is missing or invalid"); continue }
++		if (unstable) {
++			note("WARN", p ": driver reload or recovery crossed the sampling window; deltas omitted")
++			continue
++		}
++		if (r && rx_inactive) note("WARN", p ": RX was quiesced during sampling; delta omitted")
++		if (r && !rx_inactive) {
++			d = e = 0
++			for (t = b+1; t <= s; t++) {
++				d += delta(values[t-1,p,"rx_host_packets"]+0,values[t,p,"rx_host_packets"]+0)
++				e += delta(values[t-1,p,"rx_host_errors"]+0,values[t,p,"rx_host_errors"]+0)
++			}
++			rx_delta[nv] = sprintf("%.0f",d); error_delta[nv] = sprintf("%.0f",e)
++			print "RX " p ": host_frames_delta=" rx_delta[nv] ", errors_delta=" error_delta[nv]
++			if (d > 0) observed++; else if (require_traffic) note("WARN", p ": no NPU receive progress observed; traffic is required")
++			if (e > 0) note("WARN", p ": NPU host delivery errors increased")
++		}
++		if (w) {
++			if (tx_unreadable) {
++				note("WARN", p ": WED counters unavailable (quiesced, recovering or read-clear mode)")
++			} else {
++				d = 0
++				for (t = b+1; t <= s; t++)
++					d += delta(values[t-1,p,"tx_mib0"]+0,values[t,p,"tx_mib0"]+0) + delta(values[t-1,p,"tx_mib1"]+0,values[t,p,"tx_mib1"]+0)
++				tx_delta[nv] = sprintf("%.0f",d)
++				print "TX " p ": wed_mib_delta=" tx_delta[nv]
++				if (d > 0) observed++; else if (require_traffic) note("WARN", p ": no WED transmit progress observed; traffic is required")
++			}
++		}
++	}
++	if (checked && !needed && dt_known && (dt_rx || dt_wed))
++		note("WARN", "Device tree requests offload but no matching requested controller view was found")
++	if (!checked) {
++		note("WARN", "No usable offload_status; check debugfs, driver version and PHY selection")
++	}
++	if (parameter_disabled && (wed_mode(expect) || (expect == "auto" && dt_wed)))
++		note("FAIL", "WED requested but mt7915e.wed_enable is disabled")
++	if (log_errors) note("WARN", "Kernel log contains offload/DMA errors; inspect sample-*/logs/dmesg.txt")
++	if (log_unavailable) note("WARN", "Kernel log collection is incomplete; inspect logs/dmesg.stderr and .exit")
++	result = failures ? "FAIL" : warnings ? "WARN" : !needed ? "SKIP" : observed == needed ? "PASS" : "READY"
++	code = failures ? 1 : warnings ? 2 : 0
++	if (result == "READY") print "READY: required paths are configured; idle counters do not prove forwarding or throughput."
++	print "RESULT: " result
++	print "Full RX-to-PPE forwarding and actual radio throughput are not asserted by this check."
++	print "{\"format\":1,\"result\":" quote(result) ",\"exit_code\":" code ",\"expected\":" quote(expect) ",\"views\":[" > json_file
++	for (i = 1; i <= nv; i++) {
++		if (i > 1) printf ",\n" > json_file
++		printf "{\"phy\":%s,\"instance\":%s,\"mode\":%s,\"rx_host_delta\":%s,\"rx_errors_delta\":%s,\"wed_tx_delta\":%s}", quote(view[i]),quote(view_instance[i]),quote(view_mode[i]),rx_delta[i],error_delta[i],tx_delta[i] > json_file
++	}
++	print "],\"messages\":[" > json_file
++	for (i = 1; i <= nm; i++) printf "%s%s", (i > 1 ? "," : ""), quote(messages[i]) > json_file
++	print "]}" > json_file
++	close(json_file)
++	exit code
++}

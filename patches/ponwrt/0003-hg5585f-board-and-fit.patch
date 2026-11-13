@@ -1,0 +1,335 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] HG5585F board and FIT overlays including default offload CT
+
+Apply this patch to the PonWrt root before feeds and package preparation.
+
+---
+--- a/target/linux/airoha/dts/an7581-fiberhome-hg5585f-common.dtsi
++++ b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-common.dtsi
+@@ -319,7 +319,7 @@
+ 	pcie@0,0 {
+ 		reg = <0x0000 0 0 0 0>;
+ 
+-		wifi@0,0 {
++		hg5585f_wifi: wifi@0,0 {
+ 			compatible = "mediatek,mt76";
+ 			reg = <0x0000 0 0 0 0>;
+ 			nvmem-cells = <&wifi_eeprom>;
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-npu-wed.dts
+@@ -0,0 +1,4 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++
++#include "an7581-fiberhome-hg5585f-ct.dts"
++#include "an7581-hg5585f-npu-wed.dtsi"
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-npu-legacy.dtso
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/reset/airoha,en7581-reset.h>
++
++/* Explicit protocol-diagnostic overlay; stock WLAN ABI disables upstream PPE. */
++&npu {
++	reg = <0x0 0x1e900000 0x0 0x313000>,
++	      <0x0 0x1fb30000 0x0 0x2b0>;
++	reg-names = "npu", "rx-copy";
++	resets = <&scuclk EN7581_NPU_RST>, <&scuclk EN7581_GDMA_RST>;
++	reset-names = "npu", "rx-copy";
++	airoha,wlan-firmware-abi = "hg5585f-2024";
++	firmware-name = "airoha/hg5585f_npu_rv32.bin",
++			"airoha/hg5585f_npu_data.bin";
++};
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-npu-rx.dtso
+@@ -0,0 +1,39 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/reset/airoha,en7581-reset.h>
++
++/* Stock NPU receive/reorder with Linux forwarding. */
++&{/reserved-memory} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	ranges;
++
++	hg5585f_rxpkt: npu-rx-pkt@98000000 {
++		no-map;
++		reg = <0x0 0x98000000 0x0 0x600000>;
++	};
++
++	hg5585f_rxba: npu-rx-ba@98600000 {
++		no-map;
++		reg = <0x0 0x98600000 0x0 0x80000>;
++	};
++};
++
++&npu {
++	reg = <0x0 0x1e900000 0x0 0x313000>,
++	      <0x0 0x1fb30000 0x0 0x2b0>;
++	reg-names = "npu", "rx-copy";
++	resets = <&scuclk EN7581_NPU_RST>, <&scuclk EN7581_GDMA_RST>;
++	reset-names = "npu", "rx-copy";
++	airoha,wlan-firmware-abi = "hg5585f-2024";
++	firmware-name = "airoha/hg5585f_npu_rv32.bin",
++			"airoha/hg5585f_npu_data.bin";
++	memory-region = <&npu_binary>, <&hg5585f_rxpkt>, <&hg5585f_rxba>;
++	memory-region-names = "binary", "pkt", "ba";
++};
++
++&hg5585f_wifi {
++	airoha,hg5585f-rx-offload;
++};
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-npu-wed.dtsi
+@@ -0,0 +1,61 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++
++#include <dt-bindings/reset/airoha,en7581-reset.h>
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++
++/* WED transmit and stock NPU receive/reorder with Linux RX forwarding. */
++&{/reserved-memory} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	ranges;
++
++	hg5585f_rxpkt: npu-rx-pkt@98000000 {
++		no-map;
++		reg = <0x0 0x98000000 0x0 0x600000>;
++	};
++
++	hg5585f_rxba: npu-rx-ba@98600000 {
++		no-map;
++		reg = <0x0 0x98600000 0x0 0x80000>;
++	};
++};
++
++&npu {
++	reg = <0x0 0x1e900000 0x0 0x313000>,
++	      <0x0 0x1fb30000 0x0 0x2b0>;
++	reg-names = "npu", "rx-copy";
++	resets = <&scuclk EN7581_NPU_RST>, <&scuclk EN7581_GDMA_RST>;
++	reset-names = "npu", "rx-copy";
++	airoha,wlan-firmware-abi = "hg5585f-2024";
++	firmware-name = "airoha/hg5585f_npu_rv32.bin",
++			"airoha/hg5585f_npu_data.bin";
++	memory-region = <&npu_binary>, <&hg5585f_rxpkt>, <&hg5585f_rxba>;
++	memory-region-names = "binary", "pkt", "ba";
++};
++
++&hg5585f_wifi {
++	airoha,hg5585f-rx-offload;
++};
++
++&{/soc} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	hg5585f_wed1: wed@1fa03000 {
++		compatible = "airoha,en7581-wed";
++		reg = <0x0 0x1fa03000 0x0 0xb00>,
++		      <0x0 0x1fa06400 0x0 0x400>;
++		reg-names = "wed", "wdma";
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
++		airoha,pcie = <&pcie1>;
++	};
++};
++
++&hg5585f_wifi {
++	airoha,wed = <&hg5585f_wed1>;
++};
++
++&eth {
++	airoha,hg5585f-ppe;
++};
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-npu-wed.dtso
+@@ -0,0 +1,63 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/reset/airoha,en7581-reset.h>
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++
++/* WED transmit and stock NPU receive/reorder with Linux RX forwarding. */
++&{/reserved-memory} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	ranges;
++
++	hg5585f_rxpkt: npu-rx-pkt@98000000 {
++		no-map;
++		reg = <0x0 0x98000000 0x0 0x600000>;
++	};
++
++	hg5585f_rxba: npu-rx-ba@98600000 {
++		no-map;
++		reg = <0x0 0x98600000 0x0 0x80000>;
++	};
++};
++
++&npu {
++	reg = <0x0 0x1e900000 0x0 0x313000>,
++	      <0x0 0x1fb30000 0x0 0x2b0>;
++	reg-names = "npu", "rx-copy";
++	resets = <&scuclk EN7581_NPU_RST>, <&scuclk EN7581_GDMA_RST>;
++	reset-names = "npu", "rx-copy";
++	airoha,wlan-firmware-abi = "hg5585f-2024";
++	firmware-name = "airoha/hg5585f_npu_rv32.bin",
++			"airoha/hg5585f_npu_data.bin";
++	memory-region = <&npu_binary>, <&hg5585f_rxpkt>, <&hg5585f_rxba>;
++	memory-region-names = "binary", "pkt", "ba";
++};
++
++&hg5585f_wifi {
++	airoha,hg5585f-rx-offload;
++};
++
++&{/soc} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	hg5585f_wed1: wed@1fa03000 {
++		compatible = "airoha,en7581-wed";
++		reg = <0x0 0x1fa03000 0x0 0xb00>,
++		      <0x0 0x1fa06400 0x0 0x400>;
++		reg-names = "wed", "wdma";
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
++		airoha,pcie = <&pcie1>;
++	};
++};
++
++&hg5585f_wifi {
++	airoha,wed = <&hg5585f_wed1>;
++};
++
++&eth {
++	airoha,hg5585f-ppe;
++};
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-ppe.dtso
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/reset/airoha,en7581-reset.h>
++
++/* HG5585F 2024 firmware with Linux-managed PPE and native Wi-Fi DMA. */
++&npu {
++	reg = <0x0 0x1e900000 0x0 0x313000>,
++	      <0x0 0x1fb30000 0x0 0x2b0>;
++	reg-names = "npu", "rx-copy";
++	resets = <&scuclk EN7581_NPU_RST>, <&scuclk EN7581_GDMA_RST>;
++	reset-names = "npu", "rx-copy";
++	airoha,wlan-firmware-abi = "hg5585f-2024";
++	firmware-name = "airoha/hg5585f_npu_rv32.bin",
++			"airoha/hg5585f_npu_data.bin";
++};
++
++&eth {
++	airoha,hg5585f-ppe;
++};
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-wed-tx.dtso
+@@ -0,0 +1,25 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++
++/* WED transmit with the upstream PPE firmware; native Wi-Fi receive. */
++&{/soc} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	hg5585f_wed1: wed@1fa03000 {
++		compatible = "airoha,en7581-wed";
++		reg = <0x0 0x1fa03000 0x0 0xb00>,
++		      <0x0 0x1fa06400 0x0 0x400>;
++		reg-names = "wed", "wdma";
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
++		airoha,pcie = <&pcie1>;
++	};
++};
++
++&hg5585f_wifi {
++	airoha,wed = <&hg5585f_wed1>;
++};
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-hg5585f-wlan-diagnostics.dtso
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++
++/* Register diagnostics with the current firmware. No PCIe IRQ reassignment. */
++&{/soc} {
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	wlan-offload@1fa03000 {
++		compatible = "fiberhome,hg5585f-wlan-offload";
++		reg = <0x0 0x1fa03000 0x0 0xb00>,
++		      <0x0 0x1fa06400 0x0 0x400>;
++		reg-names = "wed", "wdma";
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "wed";
++		airoha,npu = <&npu>;
++	};
++};
+--- a/target/linux/airoha/image/an7581.mk
++++ b/target/linux/airoha/image/an7581.mk
+@@ -182,6 +182,13 @@
+   KERNEL_IN_UBI := 1
+   KERNEL := kernel-bin | gzip
+   KERNEL_INITRAMFS_SUFFIX := -recovery.itb
++  DEVICE_DTS_OVERLAY := $(if $(and $(filter y,$(CONFIG_KERNEL_NET_AIROHA_NPU_HG5585F)),$(filter y,$(CONFIG_PACKAGE_airoha-hg5585f-npu-firmware))),an7581-hg5585f-npu-legacy)
++  DEVICE_DTS_OVERLAY += $(if $(filter y,$(CONFIG_KERNEL_NET_AIROHA_WLAN_DIAG)),an7581-hg5585f-wlan-diagnostics)
++  DEVICE_DTS_OVERLAY += $(if $(filter y,$(CONFIG_KERNEL_NET_AIROHA_WED)),an7581-hg5585f-wed-tx)
++  DEVICE_DTS_OVERLAY += $(if $(filter y,$(CONFIG_PACKAGE_MT7915_NPU_RX)),an7581-hg5585f-npu-rx)
++  DEVICE_DTS_OVERLAY += $(if $(and $(filter y,$(CONFIG_KERNEL_NET_AIROHA_PPE_HG5585F)),$(filter y,$(CONFIG_PACKAGE_airoha-hg5585f-npu-firmware))),an7581-hg5585f-ppe)
++  DEVICE_DTS_OVERLAY += $(if $(and $(filter y,$(CONFIG_KERNEL_NET_AIROHA_WED)),$(filter y,$(CONFIG_KERNEL_NET_AIROHA_PPE_HG5585F)),$(filter y,$(CONFIG_PACKAGE_MT7915_NPU_RX))),an7581-hg5585f-npu-wed)
++  DEVICE_DTC_FLAGS := $$(if $$(strip $$(DEVICE_DTS_OVERLAY)),-@)
+   IMAGES := sysupgrade.itb
+   # PON and MT7916D read per-device calibration from factory UBI NVMEM cells.
+   DEVICE_PACKAGES := kmod-gpio-button-hotplug kmod-leds-gpio kmod-usb3 \
+@@ -199,11 +206,25 @@
+ 	append-metadata
+ endef
+ 
++# Fold the shared offload description into the default CT DTB.
++define Device/fiberhome_hg5585f-ct-offload
++  DEVICE_DTS := an7581-fiberhome-hg5585f-ct-npu-wed
++  DEVICE_DTS_OVERLAY :=
++  DEVICE_DTC_FLAGS :=
++  DEVICE_PACKAGES += airoha-hg5585f-npu-firmware hg5585f-offload-tools
++endef
++
+ define Device/fiberhome_hg5585f-ct
+   $(call Device/fiberhome_hg5585f-common)
+   DEVICE_MODEL := HG5585F
+   DEVICE_VARIANT := CT
+   DEVICE_DTS := an7581-fiberhome-hg5585f-ct
++  $(if $(and $(filter y,$(CONFIG_KERNEL_NET_AIROHA_NPU_HG5585F)), \
++      $(filter y,$(CONFIG_KERNEL_NET_AIROHA_PPE_HG5585F)), \
++      $(filter y,$(CONFIG_KERNEL_NET_AIROHA_WED)), \
++      $(filter y,$(CONFIG_PACKAGE_MT7915_NPU_RX)), \
++      $(filter y,$(CONFIG_PACKAGE_airoha-hg5585f-npu-firmware))), \
++    $(call Device/fiberhome_hg5585f-ct-offload))
+   DEVICE_PACKAGES += kmod-phy-maxlinear
+   SUPPORTED_DEVICES += fiberhome,hg5585f-ct-usb-sfp
+   $(call Device/fiberhome_hg5585f-images)
