@@ -4,6 +4,8 @@ Subject: [PATCH] HG5585F mt76 integration and enabled runtime diagnostics
 Apply this patch to the PonWrt root before feeds and package preparation.
 
 ---
+diff --git a/package/kernel/mt76/Makefile b/package/kernel/mt76/Makefile
+index 777e9d8890..116d7822a6 100644
 --- a/package/kernel/mt76/Makefile
 +++ b/package/kernel/mt76/Makefile
 @@ -1,7 +1,7 @@
@@ -15,7 +17,7 @@ Apply this patch to the PonWrt root before feeds and package preparation.
  
  PKG_LICENSE:=BSD-3-Clause-Clear
  PKG_LICENSE_FILES:=
-@@ -25,6 +25,10 @@
+@@ -25,6 +25,10 @@ PKG_CONFIG_DEPENDS += \
  	CONFIG_PACKAGE_kmod-mt76x2 \
  	CONFIG_PACKAGE_kmod-mt76x2u \
  	CONFIG_PACKAGE_kmod-mt7603 \
@@ -26,25 +28,24 @@ Apply this patch to the PonWrt root before feeds and package preparation.
  	CONFIG_PACKAGE_CFG80211_TESTMODE
  
  STAMP_CONFIGURED_DEPENDS := $(STAGING_DIR)/usr/include/mac80211-backport/backport/autoconf.h
-@@ -238,8 +242,11 @@
+@@ -238,9 +242,12 @@ define KernelPackage/mt7915e
    DEPENDS+=@PCI_SUPPORT +kmod-mt76-connac +kmod-hwmon-core +kmod-thermal +@DRIVER_11AX_SUPPORT +@KERNEL_RELAY
    FILES:= $(PKG_BUILD_DIR)/mt7915/mt7915e.ko
    AUTOLOAD:=$(call AutoProbe,mt7915e)
 -ifneq ($(CONFIG_TARGET_mediatek_filogic)$(CONFIG_TARGET_mediatek_mt7622),)
 +ifneq ($(CONFIG_TARGET_mediatek_filogic)$(CONFIG_TARGET_mediatek_mt7622)$(CONFIG_KERNEL_NET_AIROHA_WED),)
    MODPARAMS.mt7915e:=wed_enable=Y
-+endif
+ endif
 +ifdef CONFIG_PACKAGE_MT7915_NPU_PROBE
 +  MODPARAMS.mt7915e+=npu_probe=Y
- endif
++endif
  endef
  
-@@ -247,6 +254,38 @@
-   $(KernelPackage/mt76-default)
-   DEPENDS+=+kmod-mt7915e
+ define KernelPackage/mt7916-firmware
+@@ -249,6 +256,38 @@ define KernelPackage/mt7916-firmware
    TITLE:=MediaTek MT7916 firmware
-+endef
-+
+ endef
+ 
 +define KernelPackage/mt7915e/config
 +	config PACKAGE_MT7915_NPU_PROBE
 +		bool "MT7916 Airoha NPU capability diagnostics"
@@ -75,10 +76,12 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 +		  and packet reordering. Receive forwarding stays in Linux.
 +		  Host-managed legacy PPE plus WED adds a combined FIT overlay
 +		  with WED transmit and NPU receive/reorder.
- endef
- 
++endef
++
  define KernelPackage/mt7981-firmware
-@@ -479,6 +518,14 @@
+   $(KernelPackage/mt76-default)
+   DEPENDS:=@TARGET_mediatek_filogic
+@@ -479,6 +518,14 @@ ifdef CONFIG_PACKAGE_kmod-mt7663u
  endif
  ifdef CONFIG_PACKAGE_kmod-mt7915e
    PKG_MAKE_FLAGS += CONFIG_MT7915E=m
@@ -93,6 +96,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
    ifdef CONFIG_TARGET_mediatek_filogic
      PKG_MAKE_FLAGS += CONFIG_MT798X_WMAC=y
      NOSTDINC_FLAGS += -DCONFIG_MT798X_WMAC
+diff --git a/package/kernel/mt76/patches/120-mt7915-airoha-npu-capability-probe.patch b/package/kernel/mt76/patches/120-mt7915-airoha-npu-capability-probe.patch
+new file mode 100644
+index 0000000000..14751d2776
 --- /dev/null
 +++ b/package/kernel/mt76/patches/120-mt7915-airoha-npu-capability-probe.patch
 @@ -0,0 +1,189 @@
@@ -285,6 +291,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 ++	debugfs_create_file("npu_probe", 0400, dir, dev,
 ++			    &mt7915_npu_probe_fops);
 ++}
+diff --git a/package/kernel/mt76/patches/121-npu-hg5585f-transactional-rx-backend.patch b/package/kernel/mt76/patches/121-npu-hg5585f-transactional-rx-backend.patch
+new file mode 100644
+index 0000000000..9cc2e2a20f
 --- /dev/null
 +++ b/package/kernel/mt76/patches/121-npu-hg5585f-transactional-rx-backend.patch
 @@ -0,0 +1,409 @@
@@ -697,9 +706,12 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 ++	q->queued = 0;
 ++	q->stopped = false;
 ++}
+diff --git a/package/kernel/mt76/patches/122-npu-publish-legacy-rings-after-IRQ-and-NAPI-setup.patch b/package/kernel/mt76/patches/122-npu-publish-legacy-rings-after-IRQ-and-NAPI-setup.patch
+new file mode 100644
+index 0000000000..ea5c818280
 --- /dev/null
 +++ b/package/kernel/mt76/patches/122-npu-publish-legacy-rings-after-IRQ-and-NAPI-setup.patch
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,215 @@
 +From: PonWrt developers <noreply@localhost>
 +Subject: [PATCH] wifi: mt76: publish legacy NPU rings after IRQ and NAPI setup
 +
@@ -802,6 +814,19 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 ++		err = regmap_read(npu->regmap, reg, &base);
 ++		if (err)
 ++			goto out;
+++		/*
+++		 * The stock blob leaves a small sentinel (0x457 on HG5585F)
+++		 * in the RX base register before the host ring is installed.
+++		 * A real legacy ring address is in the 0x1e8xxxxx NPU SRAM
+++		 * window; clear only this impossible low-address residue.
+++		 */
+++		if (base && base < 0x100000) {
+++			dev_warn(dev->dev,
+++				 "legacy NPU RX%u stale base %08x; clearing before handoff\n",
+++				 index, base);
+++			regmap_write(npu->regmap, reg, 0);
+++			base = 0;
+++		}
 ++		if (base) {
 ++			err = -EBUSY;
 ++			goto out;
@@ -902,6 +927,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + }
 + 
 + static int
+diff --git a/package/kernel/mt76/patches/123-mt7915-add-airoha-wed-transmit-path.patch b/package/kernel/mt76/patches/123-mt7915-add-airoha-wed-transmit-path.patch
+new file mode 100644
+index 0000000000..7362613e6b
 --- /dev/null
 +++ b/package/kernel/mt76/patches/123-mt7915-add-airoha-wed-transmit-path.patch
 @@ -0,0 +1,398 @@
@@ -1303,6 +1331,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + int mt7915_txbf_init(struct mt7915_dev *dev);
 + void mt7915_init_txpower(struct mt7915_phy *phy);
 + void mt7915_reset(struct mt7915_dev *dev);
+diff --git a/package/kernel/mt76/patches/124-mt7915-propagate-initial-dma-start-error.patch b/package/kernel/mt76/patches/124-mt7915-propagate-initial-dma-start-error.patch
+new file mode 100644
+index 0000000000..0df8ae7804
 --- /dev/null
 +++ b/package/kernel/mt76/patches/124-mt7915-propagate-initial-dma-start-error.patch
 @@ -0,0 +1,21 @@
@@ -1327,6 +1358,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + }
 + 
 + int mt7915_dma_reset(struct mt7915_dev *dev, bool force)
+diff --git a/package/kernel/mt76/patches/125-npu-hg5585f-observe-producer-commit.patch b/package/kernel/mt76/patches/125-npu-hg5585f-observe-producer-commit.patch
+new file mode 100644
+index 0000000000..9126edafcd
 --- /dev/null
 +++ b/package/kernel/mt76/patches/125-npu-hg5585f-observe-producer-commit.patch
 @@ -0,0 +1,80 @@
@@ -1410,6 +1444,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + 		return NULL;
 + 	}
 + 	if (count < 0) {
+diff --git a/package/kernel/mt76/patches/126-mt7915-prepare-legacy-npu-rx-controls-and-delivery.patch b/package/kernel/mt76/patches/126-mt7915-prepare-legacy-npu-rx-controls-and-delivery.patch
+new file mode 100644
+index 0000000000..ccce66cad1
 --- /dev/null
 +++ b/package/kernel/mt76/patches/126-mt7915-prepare-legacy-npu-rx-controls-and-delivery.patch
 @@ -0,0 +1,434 @@
@@ -1847,6 +1884,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 ++	/* NPU queue IDs must never index the chip's native interrupt map. */
 ++	return true;
 ++}
+diff --git a/package/kernel/mt76/patches/127-wed-preserve-native-rx-and-station-setup-on-airoha.patch b/package/kernel/mt76/patches/127-wed-preserve-native-rx-and-station-setup-on-airoha.patch
+new file mode 100644
+index 0000000000..a810c89ade
 --- /dev/null
 +++ b/package/kernel/mt76/patches/127-wed-preserve-native-rx-and-station-setup-on-airoha.patch
 @@ -0,0 +1,59 @@
@@ -1909,6 +1949,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + 		return 0;
 + 
 + 	return mtk_wed_device_update_msg(&dev->mmio.wed, WED_WO_STA_REC,
+diff --git a/package/kernel/mt76/patches/128-mt7915-connect-hg5585f-npu-receive-path.patch b/package/kernel/mt76/patches/128-mt7915-connect-hg5585f-npu-receive-path.patch
+new file mode 100644
+index 0000000000..cc19ea6ccd
 --- /dev/null
 +++ b/package/kernel/mt76/patches/128-mt7915-connect-hg5585f-npu-receive-path.patch
 @@ -0,0 +1,786 @@
@@ -2698,6 +2741,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + 
 + static int mt76_npu_legacy_rx_available(struct mt76_queue *q)
 + {
+diff --git a/package/kernel/mt76/patches/129-mt7915-combine-wed-tx-and-legacy-npu-rx.patch b/package/kernel/mt76/patches/129-mt7915-combine-wed-tx-and-legacy-npu-rx.patch
+new file mode 100644
+index 0000000000..64ced81af6
 --- /dev/null
 +++ b/package/kernel/mt76/patches/129-mt7915-combine-wed-tx-and-legacy-npu-rx.patch
 @@ -0,0 +1,112 @@
@@ -2813,6 +2859,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + 
 + 	if (!ret) {
 + 		hif2 = mt7915_pci_init_hif2(pdev);
+diff --git a/package/kernel/mt76/patches/130-mt7915-fix-offload-probe-unwind.patch b/package/kernel/mt76/patches/130-mt7915-fix-offload-probe-unwind.patch
+new file mode 100644
+index 0000000000..e58b38a07b
 --- /dev/null
 +++ b/package/kernel/mt76/patches/130-mt7915-fix-offload-probe-unwind.patch
 @@ -0,0 +1,318 @@
@@ -3134,6 +3183,9 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + 	mt76_free_device(&dev->mt76);
 + 
 + 	return ret;
+diff --git a/package/kernel/mt76/patches/131-mt7915-add-passive-offload-status.patch b/package/kernel/mt76/patches/131-mt7915-add-passive-offload-status.patch
+new file mode 100644
+index 0000000000..1f60d13c65
 --- /dev/null
 +++ b/package/kernel/mt76/patches/131-mt7915-add-passive-offload-status.patch
 @@ -0,0 +1,167 @@
@@ -3306,6 +3358,7 @@ Apply this patch to the PonWrt root before feeds and package preparation.
 + 	    (!mt76_queue_is_npu_legacy(&dev->q_rx[qid]) || !dev->q_rx[qid].stopped))
 diff --git a/package/kernel/mt76/patches/132-hg5585f-rx-descriptor-debug-dump.patch b/package/kernel/mt76/patches/132-hg5585f-rx-descriptor-debug-dump.patch
 new file mode 100644
+index 0000000000..6333838a4f
 --- /dev/null
 +++ b/package/kernel/mt76/patches/132-hg5585f-rx-descriptor-debug-dump.patch
 @@ -0,0 +1,96 @@
