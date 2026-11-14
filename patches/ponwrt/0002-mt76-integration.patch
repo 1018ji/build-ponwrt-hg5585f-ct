@@ -708,7 +708,7 @@ index 0000000000..9cc2e2a20f
 ++}
 diff --git a/package/kernel/mt76/patches/122-npu-publish-legacy-rings-after-IRQ-and-NAPI-setup.patch b/package/kernel/mt76/patches/122-npu-publish-legacy-rings-after-IRQ-and-NAPI-setup.patch
 new file mode 100644
-index 0000000000..ea5c818280
+index 0000000000..798a5a4a42
 --- /dev/null
 +++ b/package/kernel/mt76/patches/122-npu-publish-legacy-rings-after-IRQ-and-NAPI-setup.patch
 @@ -0,0 +1,215 @@
@@ -803,7 +803,7 @@ index 0000000000..ea5c818280
 + 						   : -EINVAL;
 + 	if (irq < 0) {
 + 		err = irq;
-+@@ -302,6 +308,18 @@
++@@ -302,6 +308,31 @@
 + 	if (legacy && q->ndesc) {
 + 		err = -EBUSY;
 + 		goto out;
