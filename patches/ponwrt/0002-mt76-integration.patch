@@ -3458,3 +3458,51 @@ index 0000000000..6333838a4f
 + 	mt76_npu_legacy_rx_retire(dev, q, count, skb, meta);
 + 	if (!skb)
 + 		return ERR_PTR(-ENOMEM);
+diff --git a/package/kernel/mt76/patches/133-mt7915-fallback-native-wifi-when-wed-busy.patch b/package/kernel/mt76/patches/133-mt7915-fallback-native-wifi-when-wed-busy.patch
+new file mode 100644
+index 0000000000..415ef535d4
+--- /dev/null
++++ b/package/kernel/mt76/patches/133-mt7915-fallback-native-wifi-when-wed-busy.patch
+@@ -0,0 +1,42 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] wifi: mt7915: fall back to native DMA when Airoha WED is busy
++
++The HG5585F boot firmware can leave WDMA TX enabled before mt7915e probes.
++The Airoha WED provider reports -EBUSY in that case. Keep the wireless
++device usable with native mt7915 DMA and mark WED unavailable instead of
++aborting the whole PCI probe. Legacy NPU RX remains independent of WED.
++
++---
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -728 +728,8 @@ int mt7915_mmio_wed_init(struct mt7915_dev *dev, void *pdev_ptr,
++-			return ret == -ENODEV ? -EPROBE_DEFER : ret;
+++			if (ret == -ENODEV)
+++				return -EPROBE_DEFER;
+++			else {
+++				dev_warn(dev->mt76.dev,
+++					 "Airoha WED unavailable (%d); using native Wi-Fi DMA\n",
+++					 ret);
+++				dev->recovery.wed_failed = true;
+++			}
++diff --git a/mt7915/pci.c b/mt7915/pci.c
++index 460b970..eb60d8b 100644
++--- a/mt7915/pci.c
+++++ b/mt7915/pci.c
++@@ -159,2 +159,10 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++-	if (ret)
++-		goto free_device;
+++	if (ret) {
+++		if (ret == -EBUSY) {
+++			dev_warn(mdev->dev,
+++				 "HG5585F NPU RX busy (%d); using native Wi-Fi DMA\n",
+++				 ret);
+++			ret = 0;
+++		} else {
+++			goto free_device;
+++		}
+++	}
++@@ -168 +176,2 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++-	    !mtk_wed_device_active(&mdev->mmio.wed)) {
+++	    !mtk_wed_device_active(&mdev->mmio.wed) &&
+++	    !dev->recovery.wed_failed) {
