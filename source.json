@@ -1,0 +1,275 @@
+{
+  "source_url": "https://github.com/1018ji/ponwrt.git",
+  "source_commit": "d9dd3a49f7bb7661c01e9c57c9e2aac2a1114b3e",
+  "exported_from": "new",
+  "patches": [
+    {
+      "name": "0001-hg5585f-board-and-calibration.patch",
+      "sha256": "f0055d3a9a4dff2a7870cf04490887046031ccec23c7eafecb9599562d294d63"
+    },
+    {
+      "name": "0002-airoha-wifi-npu-wed-ppe.patch",
+      "sha256": "88d5b293fb147faa6601545faef2590c3886dd1a0207a3834aab3c52febc1274"
+    },
+    {
+      "name": "0003-hg5585f-firmware-and-validation.patch",
+      "sha256": "3297f46e9ad5a35b2b86edc41bf3588549e8fb4375bd25c4e342bc746775d3bb"
+    },
+    {
+      "name": "0004-luci-hardware-accounting.patch",
+      "sha256": "097e6e575d6b07fa9fb88d9370c00903bb02ad485ef1a2418755d3cb8877da63"
+    },
+    {
+      "name": "0005-hg5585f-build-profile.patch",
+      "sha256": "0b76d5c1ac89d0a8e7e6bc2729d2127049cebfe4b908e39042bc6ed7d1762a23"
+    },
+    {
+      "name": "0006-hg5585f-wifi-review-and-diagnostics.patch",
+      "sha256": "ea6c008527c75287d2777de7bdea5751178ee1f518dd88fdd6205e1e2130c59f"
+    }
+  ],
+  "files": {
+    "target/linux/airoha/base-files/lib/preinit/07_an7581_bsp_wifi_mac": {
+      "sha256": "d56093686f7e6fc236836e6def247a61d4e287ec98e783c595bda8b5e946afdf",
+      "executable": true
+    },
+    "target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-npu.dts": {
+      "sha256": "5f7fe4ac9d1ba0eee80ef8f626aa59e5418833d71e3b95a15e3a4a5a56f5f499",
+      "executable": false
+    },
+    "target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-wed.dts": {
+      "sha256": "ffff76944d2b4ad420b83deafe349489460a08409ffbaebf8ff9cbab9705a808",
+      "executable": false
+    },
+    "target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct.dts": {
+      "sha256": "ca9a0d2afe3b89df39f67be4afe6abaff7e2cece543d33dd576d168fc9a527c9",
+      "executable": false
+    },
+    "target/linux/airoha/image/an7581.mk": {
+      "sha256": "5fb6e934645c71d98049ae01463d80ea1f9723359d128ef311661add9249d5e9",
+      "executable": false
+    },
+    "files/etc/hotplug.d/firmware/10-mt7916-an-eeprom": {
+      "sha256": "94107d4d8a9a5d00305d35d67088ec20d3c2edf936e6e6d2036d07c1ac424be7",
+      "executable": true
+    },
+    "files/etc/init.d/mt7916-an-eeprom": {
+      "sha256": "42cc36c0c55b054a26f548acf793cdf502f63c0e0e75429094a84d4ff2d7876e",
+      "executable": true,
+      "reviewed": true
+    },
+    "files/etc/hotplug.d/net/99-wifi-affinity": {
+      "sha256": "bb458342e14f57f14a446f3c2adeaaa636f742021454ae5a3ca78597cd3375ce",
+      "executable": true
+    },
+    "files/usr/sbin/pin-wifi-cpus.sh": {
+      "sha256": "35270d0d324b0cb011d86389f447c068caaa329afacbab6321f336ec8da80fbb",
+      "executable": true
+    },
+    "files/etc/Wireless/RT2860AP/SingleSKU.dat": {
+      "sha256": "744d478fd6d7ecf4ff7353eee5869d4f7baafd44c4bf4577724323a3f3d38a50",
+      "executable": false
+    },
+    "files/etc/Wireless/l1profile.dat": {
+      "sha256": "74f2d881d1588f549d5d1754f3b34d13dc73a9db6a5654f6e9137c194b9aba8f",
+      "executable": false
+    },
+    "files/etc/Wireless/mediatek/mt7916-sku.dat": {
+      "sha256": "c8b469706ba0c7c0a91bccf54d719274a186c23798daa9cf9365f44870659777",
+      "executable": false
+    },
+    "files/etc/Wireless/mediatek/mt7916-sku-bf.dat": {
+      "sha256": "bc9067a59728b28bd55e0324516b5bc401afb648380147402553140600969b17",
+      "executable": false
+    },
+    "target/linux/airoha/an7581/config-6.18": {
+      "sha256": "36ffdbade2bfc3d56c816783c594c763bff95df5eebd04ae3053b30f63ee5678",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/931-net-airoha-fix-wan-ipv6-pppoe-flow-offload.patch": {
+      "sha256": "3bbedbdc62732419e37a4b34ef35d8ab0e442c3c13989e1175bee7f3413aaa64",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/932-net-airoha-ppe-support-bridge-fdb-port-offload.patch": {
+      "sha256": "160488ba91fa2682b5d88f15efc9a4d5b3afff9e1f8110ded7ea151cf3fed05e",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch": {
+      "sha256": "ce561ceb1cefd5b660a9c51e0cc9d19771c33537ba00fdf0f52e367f6368a482",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/934-dt-bindings-net-airoha-mt7916-wed.patch": {
+      "sha256": "afe2a3eb0fecb26521d37c1a7e98289875573e25d070620fb400c7f0f5609ee9",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/935-net-airoha-hg5585f-npu-rx-ppe.patch": {
+      "sha256": "4379ef97b121cc6e9649954dceb0d38c87b1d46bd0462ad848b955ceae34c369",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/936-dt-bindings-airoha-hg5585f-npu-rx.patch": {
+      "sha256": "d59fe2671a9d92536f0d23128f3ae5ae0c1fbe8dc380b8da8aff814f5cf4244b",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/937-net-airoha-hg5585f-hardware-accounting.patch": {
+      "sha256": "daf8d02441f7f429a7fadd2090270eec701eab5987aba4893bb5f0adc85fd0a5",
+      "executable": false
+    },
+    "package/kernel/mt76/Makefile": {
+      "sha256": "edbaf63dd871ce925bf57425d30a44172d8c808ad743623564863b0646bb86f7",
+      "executable": false,
+      "reviewed": true
+    },
+    "package/kernel/mt76/patches/120-mt7915-airoha-wed-tx-native-rx.patch": {
+      "sha256": "bc2cdb4b9029b3cac9b2487b12ed1620e91a1e90c87d6088bd09d8d72d9114ec",
+      "executable": false
+    },
+    "package/kernel/mt76/patches/121-mt7915-airoha-npu-rx-ppe.patch": {
+      "sha256": "787ffc92213481e55746fe6f7c78494e8bf5a2c0a19a2dc975e4a0445663b074",
+      "executable": false
+    },
+    "files/lib/firmware/airoha/en7581_npu_rv32.bin": {
+      "sha256": "6e7b9cb9769398d5c0a603d758626719ee83610e0dd2a5bc0b66258e2ad1057f",
+      "executable": false
+    },
+    "files/lib/firmware/airoha/en7581_MT7916_npu_data.bin": {
+      "sha256": "6f8cd8d7cd1cdaadfa03bef63bf71c1ad21aa2a4ad950b501761d2387d52a696",
+      "executable": false
+    },
+    "files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin": {
+      "sha256": "a8757aabc872c31d20683aeb4c05dbb9f7f590bdd6a1102c8a6902385bb5e9a6",
+      "executable": false
+    },
+    "files/lib/firmware/airoha/en7581_npu_data.bin": {
+      "sha256": "0e742e7bef0d8f4c1537d7c17de9b601274e42b18660dfde6deba81ac395c761",
+      "executable": false
+    },
+    "files/usr/sbin/hg5585f-wifi-offload-check": {
+      "sha256": "2cd951c9bd3269081bc2c0f1dd256874b3c58a30b3099b7906aa0dda22729822",
+      "executable": true
+    },
+    "scripts/check-hg5585f-images.py": {
+      "sha256": "f5b1d064f2591395e84b7bca0c4fa13e5ef56e48cc12e872aab2b54e4b8098b5",
+      "executable": false
+    },
+    "scripts/check-hg5585f-offload.py": {
+      "sha256": "afa2518735e60f3562c17d54584b92205b4a2cc76899b890de82425e60a08d0f",
+      "executable": false,
+      "reviewed": true
+    },
+    "scripts/check-hg5585f-rom-abi.py": {
+      "sha256": "c603e203817bccf1307a3fadec45cbb92019b03d4c5353fd7f86b4c44390eab8",
+      "executable": false
+    },
+    "scripts/check-hg5585f-ppe-accounting.py": {
+      "sha256": "f0636ef8e787896066c52a93e4653dcd1f7a24c960b5ffe8033872832dab4fd1",
+      "executable": false
+    },
+    "scripts/tests/hg5585f-rom-rx.json": {
+      "sha256": "7206edffa78ff1d5b8b4c491adcdd101ebb3151a1a764a370ad6638274102a21",
+      "executable": false
+    },
+    "scripts/tests/hg5585f-rom-accounting.json": {
+      "sha256": "7727df2fd05be808e4b384b0ab2132e9cf565f86f2d062d282826f41d7f0ecaa",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/LICENSE": {
+      "sha256": "7f0f022815d9ffe57a2b9a717d49893f77bfed052f16af179dcb99dbbb6f6ab8",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/Makefile": {
+      "sha256": "c1da4f2fe293013a2197ade721c48ef6f449a1deb232df556abf31ce016886a5",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json": {
+      "sha256": "eef6d3e0e70d2a2c8c3e4b23c25e045de8c52972c818b75387db5b00ddea1729",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/root/usr/share/luci/menu.d/luci-app-airoha-npu.json": {
+      "sha256": "73b616a494cd3f9bdfb7beac5896c84cf7ee4a166bd476fd075580e0881714de",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu": {
+      "sha256": "64ca5028ad4e29bc05990e6790ec7ead2c8d6e1169c77a6a14c1066dc590d6cb",
+      "executable": true
+    },
+    "package/luci-app-airoha-npu/htdocs/luci-static/resources/view/airoha_npu/status.js": {
+      "sha256": "4fdddcd892ce5d9268cab06ac00ba7031da1b3109b15ba483e5fb2110b9decde",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/po/zh_Hans/luci-app-airoha-npu.po": {
+      "sha256": "e3514d342316e2dda0bf71aee0c9b32dd319bb8a112283ef3b30d2220bedfb5d",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/po/templates/luci-app-airoha-npu.pot": {
+      "sha256": "b3cdea24ca01a7a3c92fe403f74ce2f1125f7159746024d85cbdeafab3811c33",
+      "executable": false
+    },
+    "package/luci-app-airoha-npu/po/es/luci-app-airoha-npu.po": {
+      "sha256": "0aec414bdec187532c3199db3d604ee32a01811837ca77f8cebc9b5b7e4c3f9d",
+      "executable": false
+    },
+    "configs/hg5585f-ct.config": {
+      "sha256": "c42fa2e771e9967b55b5c0b64181a079e9785d2ccc3a43bb8b7a50017459d8da",
+      "executable": false,
+      "generated": true
+    },
+    "files/etc/uci-defaults/99-hg5585f-hardware": {
+      "sha256": "22948f4bdfb346dfc92c3c3b1079ef0cb864760e4140bd3f78d6115d5e471551",
+      "executable": true,
+      "reviewed": true
+    },
+    "feeds.conf.default": {
+      "sha256": "ca2b76510595e99c928f542dfd42ba938c0ce27128c2a138f690863ff59282de",
+      "executable": false,
+      "generated": true
+    },
+    "files/etc/config/hg5585f_wifi": {
+      "sha256": "7369b75e67b1370c10536d0471e430ed170f398437a6713413c4b061243ed591",
+      "executable": false,
+      "reviewed": true
+    },
+    "files/etc/init.d/hg5585f-wifi-diag": {
+      "sha256": "151768461edaf9e8e1f3812e3e3d24cd69e87794538f4d5555ea6067b0e6e81b",
+      "executable": true,
+      "reviewed": true
+    },
+    "files/usr/sbin/hg5585f-wifi-diag": {
+      "sha256": "926966e6155d664aefe3a092a01b952e2b2eae20cce0b810b6093afaa56e4268",
+      "executable": true,
+      "reviewed": true
+    },
+    "package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch": {
+      "sha256": "808747f9d2b959546ed562fd3e3ec16b9c83a5aa29d3fac76abd4fac52afb0bf",
+      "executable": false,
+      "reviewed": true
+    },
+    "scripts/check-hg5585f-wifi-diagnostics.py": {
+      "sha256": "801590af13774c39fb4f5c44d88de1f19fedf6d9c85de1c7f0f849aa6237c7a5",
+      "executable": false,
+      "reviewed": true
+    },
+    "target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch": {
+      "sha256": "14e8d5f09b07f5d3476693b0ef9f5ad92df1d2bd32ecad0e0db3a7d750c6ba2b",
+      "executable": false,
+      "reviewed": true
+    }
+  },
+  "feeds": {
+    "packages": {
+      "url": "https://github.com/immortalwrt/packages.git",
+      "commit": "decf94639ffd6ddd26591c190b547c6b7eea150b"
+    },
+    "luci": {
+      "url": "https://github.com/immortalwrt/luci.git",
+      "commit": "ad75cde88e694b511100576bfbe0a280e5efe6ef"
+    },
+    "pon_drivers": {
+      "url": "https://github.com/pbs05/openwrt-pon-drivers.git",
+      "commit": "2789b970a6bfcc5ee56cee699622201b8061b67c"
+    },
+    "pon_userspace": {
+      "url": "https://github.com/pbs05/openwrt-pon-userspace.git",
+      "commit": "cce9d756742487b378749c606b30e13ee9b0f093"
+    }
+  }
+}

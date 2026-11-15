@@ -6,33 +6,12 @@ on:
     inputs:
       Cache:
         type: choice
-        required: false
         default: 使用缓存
-        options:
-          - 使用缓存
-          - 只读缓存
-          - 重新编译
-          - 不使用缓存
+        options: [使用缓存, 只读缓存, 重新编译, 不使用缓存]
       SSH:
         type: choice
-        required: false
         default: 否
-        options:
-          - 否
-          - 是
-
-env:
-  REPO_URL: https://github.com/1018ji/ponwrt
-  REPO_BRANCH: master
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  TZ: Asia/Shanghai
-  CACHE_MODE: ${{ inputs.Cache || '使用缓存' }}
-  CCACHE_COMPILERCHECK: content
-  CCACHE_MAXSIZE: 3G
-  CCACHE_DIR: /workdir/openwrt/.ccache
+        options: [否, 是]
 
 permissions:
   contents: read
@@ -42,311 +21,298 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+env:
+  TZ: Asia/Shanghai
+  CACHE_MODE: ${{ inputs.Cache || '使用缓存' }}
+  CCACHE_DIR: /workdir/openwrt/.ccache
+  CCACHE_COMPILERCHECK: content
+  CCACHE_MAXSIZE: 3G
+
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
     defaults:
       run:
         shell: bash
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout build recipe
+        uses: actions/checkout@v4
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown "$USER:$(id -gn)" /workdir
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          echo "BUILD_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get -qq update
+          sudo apt-get -qq install build-essential gcc-multilib g++-multilib autoconf automake \
+            bison flex gawk gettext git gperf libelf-dev libncurses-dev libssl-dev libtool \
+            libgmp-dev libmpc-dev libmpfr-dev zlib1g-dev libzstd-dev cmake ninja-build \
+            ccache curl file jq patch pkgconf python3 python3-setuptools rsync unzip wget \
+            zstd device-tree-compiler u-boot-tools squashfs-tools swig texinfo xsltproc
+          sudo timedatectl set-timezone "$TZ"
+          sudo mkdir -p /workdir
+          sudo chown "$USER:$(id -gn)" /workdir
 
-    - name: Clone source code
-      working-directory: /workdir
-      run: |
-        df -hT "$PWD"
-        git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt
-        # Normalize source timestamps used by the tools/toolchain .prepared markers.
-        find openwrt/tools openwrt/toolchain -exec touch -h -d @1600000000 {} +
-        ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
+      - name: Fetch pinned source and apply patches from new
+        run: |
+          python3 scripts/prepare.py clone /workdir/openwrt
+          ln -s /workdir/openwrt openwrt
+          find openwrt/tools openwrt/toolchain -exec touch -h -d @1600000000 {} +
+          cp openwrt/configs/hg5585f-ct.config openwrt/.config
+          python3 openwrt/scripts/check-hg5585f-offload.py
 
-    - name: Restore download cache
-      id: dl-cache
-      if: env.CACHE_MODE != '不使用缓存'
-      continue-on-error: true
-      uses: actions/cache/restore@v4
-      with:
-        path: /workdir/openwrt/dl
-        key: hg5585f-ct-dl-v1-
-        restore-keys: |
-          hg5585f-ct-dl-v1-
+      - name: Restore downloaded sources
+        id: downloads
+        if: env.CACHE_MODE != '不使用缓存'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: /workdir/openwrt/dl
+          key: hg5585f-dl-v1-${{ github.run_id }}
+          restore-keys: hg5585f-dl-v1-
 
-    - name: Restore compiler cache
-      if: env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '只读缓存'
-      continue-on-error: true
-      uses: actions/cache/restore@v4
-      with:
-        path: /workdir/openwrt/.ccache
-        key: hg5585f-ct-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-        restore-keys: |
-          hg5585f-ct-ccache-v1-${{ runner.os }}-${{ runner.arch }}-
-
-    - name: Apply source patches and load custom feeds
-      run: |
-        if [ -f "$FEEDS_CONF" ]; then cp "$FEEDS_CONF" openwrt/feeds.conf.default; fi
-        cd openwrt
-        bash "$GITHUB_WORKSPACE/$DIY_P1_SH"
-
-    - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
-
-    - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
-
-    - name: Load custom configuration
-      run: |
-        if [ -d files ]; then
-          mkdir -p openwrt/files
-          cp -a files/. openwrt/files/
-        fi
-        cp "$CONFIG_FILE" openwrt/.config
-        cd openwrt
-        bash "$GITHUB_WORKSPACE/$DIY_P2_SH"
-        # Only the build checkout is changed; the repository .config is preserved.
-        sed -i '/^CONFIG_CCACHE=/d; /^# CONFIG_CCACHE is not set$/d; /^CONFIG_CCACHE_DIR=/d' .config
-        if [ "$CACHE_MODE" = '不使用缓存' ]; then
-          printf '# CONFIG_CCACHE is not set\nCONFIG_CCACHE_DIR=""\n' >> .config
-        else
-          sed -i '/^CONFIG_DEVEL=/d; /^# CONFIG_DEVEL is not set$/d' .config
-          printf 'CONFIG_DEVEL=y\nCONFIG_CCACHE=y\nCONFIG_CCACHE_DIR="/workdir/openwrt/.ccache"\n' >> .config
-        fi
-
-    - name: Download package
-      id: package
-      run: |
-        cd openwrt
-        make defconfig
-        sh "$GITHUB_WORKSPACE/scripts/check-build-config.sh" --generated .config
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
-        if [ "$CACHE_MODE" != '不使用缓存' ]; then
-          HASH=$(find dl -type f -printf '%P %s\n' | LC_ALL=C sort | sha256sum | cut -c1-24)
-          echo "dl_key=hg5585f-ct-dl-v1-$HASH" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Save download cache
-      id: dl-save
-      if: (env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '重新编译') && steps.package.outcome == 'success' && steps.package.outputs.dl_key != '' && steps.package.outputs.dl_key != steps.dl-cache.outputs.cache-matched-key
-      continue-on-error: true
-      uses: actions/cache/save@v4
-      with:
-        path: /workdir/openwrt/dl
-        key: ${{ steps.package.outputs.dl_key }}
-
-    - name: Setup SSH session
-      if: ${{ github.event_name == 'workflow_dispatch' && inputs.SSH == '是' }}
-      uses: owenthereal/action-upterm@v2
-      with:
-        detached: true
-        limit-access-to-actor: true
-
-    - name: Compute build cache keys
-      id: build-cache
-      if: env.CACHE_MODE != '不使用缓存'
-      run: |
-        HASHES=$(python3 "$GITHUB_WORKSPACE/scripts/build-cache-key.py" openwrt)
-        echo "tools=hg5585f-ct-tools-v2-${{ runner.os }}-${{ runner.arch }}-$(jq -r .tools <<< "$HASHES")" >> "$GITHUB_OUTPUT"
-        echo "toolchain=hg5585f-ct-toolchain-v2-${{ runner.os }}-${{ runner.arch }}-$(jq -r .toolchain <<< "$HASHES")" >> "$GITHUB_OUTPUT"
-
-    - name: Restore tools cache
-      id: tools-cache
-      if: env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '只读缓存'
-      continue-on-error: true
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          /workdir/openwrt/staging_dir/host
-          /workdir/openwrt/build_dir/host
-        key: ${{ steps.build-cache.outputs.tools }}
-
-    - name: Restore toolchain cache
-      id: toolchain-cache
-      if: env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '只读缓存'
-      continue-on-error: true
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          /workdir/openwrt/staging_dir/toolchain-*
-          /workdir/openwrt/build_dir/toolchain-*
-        key: ${{ steps.build-cache.outputs.toolchain }}
-
-    - name: Compile tools
-      id: tools-build
-      env:
-        CACHE_HIT: ${{ steps.tools-cache.outputs.cache-hit }}
-      run: |
-        cd openwrt
-        if [ "$CACHE_HIT" = true ]; then
-          find staging_dir/host build_dir/host -exec touch -h -d "@$(date +%s)" {} +
-        fi
-        make -j"$(nproc)" tools/install || make -j1 V=s tools/install
-
-    - name: Remove replaced tools cache
-      if: steps.tools-build.outcome == 'success' && env.CACHE_MODE == '重新编译' && steps.build-cache.outputs.tools != ''
-      continue-on-error: true
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
-        CACHE_KEY: ${{ steps.build-cache.outputs.tools }}
-      run: gh cache delete "$CACHE_KEY" || true
-
-    - name: Save tools cache
-      id: tools-save
-      if: steps.tools-build.outcome == 'success' && steps.build-cache.outputs.tools != '' && (env.CACHE_MODE == '重新编译' || (env.CACHE_MODE == '使用缓存' && steps.tools-cache.outputs.cache-hit != 'true'))
-      continue-on-error: true
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          /workdir/openwrt/staging_dir/host
-          /workdir/openwrt/build_dir/host
-        key: ${{ steps.build-cache.outputs.tools }}
-
-    - name: Compile toolchain
-      id: toolchain-build
-      env:
-        CACHE_HIT: ${{ steps.toolchain-cache.outputs.cache-hit }}
-      run: |
-        cd openwrt
-        if [ "$CACHE_HIT" = true ]; then
-          find staging_dir/toolchain-* build_dir/toolchain-* -exec touch -h -d "@$(date +%s)" {} +
-        fi
-        make -j"$(nproc)" toolchain/install || make -j1 V=s toolchain/install
-
-    - name: Remove replaced toolchain cache
-      if: steps.toolchain-build.outcome == 'success' && env.CACHE_MODE == '重新编译' && steps.build-cache.outputs.toolchain != ''
-      continue-on-error: true
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
-        CACHE_KEY: ${{ steps.build-cache.outputs.toolchain }}
-      run: gh cache delete "$CACHE_KEY" || true
-
-    - name: Save toolchain cache
-      id: toolchain-save
-      if: steps.toolchain-build.outcome == 'success' && steps.build-cache.outputs.toolchain != '' && (env.CACHE_MODE == '重新编译' || (env.CACHE_MODE == '使用缓存' && steps.toolchain-cache.outputs.cache-hit != 'true'))
-      continue-on-error: true
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          /workdir/openwrt/staging_dir/toolchain-*
-          /workdir/openwrt/build_dir/toolchain-*
-        key: ${{ steps.build-cache.outputs.toolchain }}
-
-    - name: Compile the firmware
-      id: compile
-      run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        # Leave time to save compiler progress before the hosted runner job limit.
-        DEADLINE=$((JOB_START + 6 * 3600 - 20 * 60))
-        run() {
-          LEFT=$((DEADLINE - $(date +%s)))
-          [ "$LEFT" -gt 0 ] || { echo "no time left"; return 124; }
-          timeout -k 60 "$LEFT" "$@"
-        }
-        run make -j"$(nproc)" || {
-          RC=$?
-          if [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
-            echo "compile timed out"
-            exit 1
+      - name: Update and install feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install luci luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug \
+            airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa \
+            iperf3 pciutils htop zoneinfo-asia
+          if [ "$CACHE_MODE" != '不使用缓存' ]; then
+            printf '\nCONFIG_DEVEL=y\nCONFIG_CCACHE=y\nCONFIG_CCACHE_DIR="%s"\n' "$CCACHE_DIR" >> .config
           fi
-          run make -j1 V=s
-        }
-        # Refuse to upload images whose default DTB omits the WED TX and native MT7916 Wi-Fi path.
-        python3 "$GITHUB_WORKSPACE/scripts/check-hg5585f-fit.py" bin/targets/airoha/an7581/*.itb
-        echo "status=success" >> "$GITHUB_OUTPUT"
+          make defconfig
+          python3 "$GITHUB_WORKSPACE/scripts/prepare.py" config .config
 
-    - name: Check space usage
-      if: (!cancelled())
-      run: df -hT
+      - name: Download package sources
+        id: download
+        working-directory: openwrt
+        run: |
+          make download -j8
+          echo "key=hg5585f-dl-v1-$(find dl -type f -printf '%P %s\n' | LC_ALL=C sort | sha256sum | cut -c1-24)" >> "$GITHUB_OUTPUT"
 
-    - name: Check compiler cache files
-      id: compiler-cache-ready
-      if: always() && env.CACHE_MODE != '不使用缓存' && (steps.tools-build.outcome == 'success' || steps.tools-build.outcome == 'failure')
-      continue-on-error: true
-      run: |
-        if [ -d "$CCACHE_DIR" ] && [ -n "$(find "$CCACHE_DIR" -type f \
-          ! -name stats ! -name ccache.conf ! -name CACHEDIR.TAG \
-          ! -path "$CCACHE_DIR/tmp/*" ! -path "$CCACHE_DIR/lock/*" -print -quit)" ]; then
-          echo 'present=true' >> "$GITHUB_OUTPUT"
-        fi
+      - name: Save downloaded sources
+        id: save-downloads
+        if: (env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '重新编译') && steps.download.outcome == 'success' && steps.download.outputs.key != steps.downloads.outputs.cache-matched-key
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /workdir/openwrt/dl
+          key: ${{ steps.download.outputs.key }}
 
-    - name: Save compiler cache
-      id: compiler-cache-save
-      if: always() && !cancelled() && steps.compiler-cache-ready.outputs.present == 'true' && (env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '重新编译')
-      continue-on-error: true
-      uses: actions/cache/save@v4
-      with:
-        path: /workdir/openwrt/.ccache
-        key: hg5585f-ct-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Compute tools and toolchain identities
+        id: identity
+        run: |
+          keys=$(python3 scripts/cache-key.py openwrt)
+          echo "tools=hg5585f-tools-v1-$(jq -r .tools <<< "$keys")" >> "$GITHUB_OUTPUT"
+          echo "toolchain=hg5585f-toolchain-v1-$(jq -r .toolchain <<< "$keys")" >> "$GITHUB_OUTPUT"
 
-    - name: Keep latest cache per category
-      if: always() && !cancelled() && (steps.dl-save.outcome == 'success' || steps.tools-save.outcome == 'success' || steps.toolchain-save.outcome == 'success' || steps.compiler-cache-save.outcome == 'success')
-      continue-on-error: true
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
-        DL_SAVED: ${{ steps.dl-save.outcome }}
-        TOOLS_SAVED: ${{ steps.tools-save.outcome }}
-        TOOLCHAIN_SAVED: ${{ steps.toolchain-save.outcome }}
-        COMPILER_SAVED: ${{ steps.compiler-cache-save.outcome }}
-        TOOLS_HIT: ${{ steps.tools-cache.outputs.cache-hit }}
-        PLATFORM: ${{ runner.os }}-${{ runner.arch }}
-      run: |
-        prune() {
-          gh cache list --key "$1" --sort created_at --order desc --limit 100 --json id --jq '.[1:][].id' |
-          while IFS= read -r id; do
-            gh cache delete "$id"
+      - name: Restore tools
+        id: tools
+        if: env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '只读缓存'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /workdir/openwrt/staging_dir/host
+            /workdir/openwrt/build_dir/host
+          key: ${{ steps.identity.outputs.tools }}
+
+      - name: Restore toolchain
+        id: toolchain
+        if: env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '只读缓存'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /workdir/openwrt/staging_dir/toolchain-*
+            /workdir/openwrt/build_dir/toolchain-*
+          key: ${{ steps.identity.outputs.toolchain }}
+
+      - name: Restore compiler cache
+        if: env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '只读缓存'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: /workdir/openwrt/.ccache
+          key: hg5585f-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: hg5585f-ccache-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Optional SSH session
+        if: github.event_name == 'workflow_dispatch' && inputs.SSH == '是'
+        uses: owenthereal/action-upterm@v2
+        with:
+          detached: true
+          limit-access-to-actor: true
+
+      - name: Build tools
+        id: build-tools
+        working-directory: openwrt
+        env:
+          RESTORED: ${{ steps.tools.outputs.cache-hit }}
+        run: |
+          if [ "$RESTORED" = true ]; then
+            find staging_dir/host build_dir/host -exec touch -h -d "@$(date +%s)" {} +
+          fi
+          make -j"$(nproc)" tools/install || make -j1 V=s tools/install
+
+      - name: Replace tools cache after successful rebuild
+        if: env.CACHE_MODE == '重新编译' && steps.build-tools.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CACHE_KEY: ${{ steps.identity.outputs.tools }}
+        run: gh cache delete "$CACHE_KEY" || true
+
+      - name: Save tools
+        id: save-tools
+        if: steps.build-tools.outcome == 'success' && (env.CACHE_MODE == '重新编译' || (env.CACHE_MODE == '使用缓存' && steps.tools.outputs.cache-hit != 'true'))
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /workdir/openwrt/staging_dir/host
+            /workdir/openwrt/build_dir/host
+          key: ${{ steps.identity.outputs.tools }}
+
+      - name: Build toolchain
+        id: build-toolchain
+        working-directory: openwrt
+        env:
+          RESTORED: ${{ steps.toolchain.outputs.cache-hit }}
+        run: |
+          if [ "$RESTORED" = true ]; then
+            find staging_dir/toolchain-* build_dir/toolchain-* -exec touch -h -d "@$(date +%s)" {} +
+          fi
+          make -j"$(nproc)" toolchain/install || make -j1 V=s toolchain/install
+
+      - name: Replace toolchain cache after successful rebuild
+        if: env.CACHE_MODE == '重新编译' && steps.build-toolchain.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CACHE_KEY: ${{ steps.identity.outputs.toolchain }}
+        run: gh cache delete "$CACHE_KEY" || true
+
+      - name: Save toolchain
+        id: save-toolchain
+        if: steps.build-toolchain.outcome == 'success' && (env.CACHE_MODE == '重新编译' || (env.CACHE_MODE == '使用缓存' && steps.toolchain.outputs.cache-hit != 'true'))
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /workdir/openwrt/staging_dir/toolchain-*
+            /workdir/openwrt/build_dir/toolchain-*
+          key: ${{ steps.identity.outputs.toolchain }}
+
+      - name: Build native, WED and NPU firmware
+        id: firmware
+        working-directory: openwrt
+        run: |
+          remaining=$((BUILD_STARTED + 345 * 60 - $(date +%s)))
+          [ "$remaining" -gt 0 ] || exit 1
+          timeout -k 60 "$remaining" make -j"$(nproc)" || {
+            result=$?
+            [ "$result" -ne 124 ] && [ "$result" -ne 137 ] || exit 1
+            remaining=$((BUILD_STARTED + 345 * 60 - $(date +%s)))
+            [ "$remaining" -gt 0 ] || exit 1
+            timeout -k 60 "$remaining" make -j1 V=s
+          }
+
+      - name: Validate actual kernel, ROM ABI and image profiles
+        working-directory: openwrt
+        run: |
+          export PATH="$PWD/staging_dir/host/bin:$PATH"
+          for kernel in build_dir/target-*/linux-airoha_an7581/linux-*; do
+            [ -f "$kernel/.config" ] || { echo 'Kernel config missing'; exit 1; }
+            python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
+            python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
+            for mt76 in build_dir/target-*/mt76-*; do
+              [ -f "$mt76/npu_rx_legacy.c" ] || { echo 'MT76 NPU RX source missing'; exit 1; }
+              python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
+              python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
+            done
           done
-        }
-        if [ "$DL_SAVED" = success ]; then prune hg5585f-ct-dl-v1-; fi
-        if [ "$TOOLS_SAVED" = success ]; then prune "hg5585f-ct-tools-v2-$PLATFORM-"; fi
-        if [ "$TOOLCHAIN_SAVED" = success ]; then
-          prune "hg5585f-ct-toolchain-v2-$PLATFORM-"
-          # Retire the old combined cache only after the replacement layers exist.
-          if [ "$TOOLS_SAVED" = success ] || [ "$TOOLS_HIT" = true ]; then
-            gh cache list --key "hg5585f-ct-toolchain-v1-$PLATFORM-" --limit 100 --json id --jq '.[].id' |
-            while IFS= read -r id; do gh cache delete "$id"; done
+          for profile in native wed npu; do
+            case "$profile" in
+              native) pattern='*fiberhome_hg5585f-ct-*'; flag= ;;
+              wed) pattern='*fiberhome_hg5585f-ct-wed-*'; flag=--wed ;;
+              npu) pattern='*fiberhome_hg5585f-ct-npu-*'; flag=--npu ;;
+            esac
+            count=0
+            while IFS= read -r image; do
+              case "$profile:$image" in native:*-ct-wed-*|native:*-ct-npu-*) continue ;; esac
+              if [ -n "$flag" ]; then
+                python3 scripts/check-hg5585f-images.py "$flag" "$image"
+              else
+                python3 scripts/check-hg5585f-images.py "$image"
+              fi
+              count=$((count + 1))
+            done < <(find bin/targets/airoha/an7581 -maxdepth 1 -name "$pattern.itb" -type f)
+            [ "$count" -ge 2 ] || { echo "Missing recovery/sysupgrade images for $profile"; exit 1; }
+          done
+
+      - name: Check compiler cache contents
+        id: compiler-ready
+        if: always() && !cancelled() && (env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '重新编译')
+        run: |
+          if [ -d "$CCACHE_DIR" ] && [ -n "$(find "$CCACHE_DIR" -type f \
+            ! -name stats ! -name ccache.conf ! -name CACHEDIR.TAG \
+            ! -path "$CCACHE_DIR/tmp/*" ! -path "$CCACHE_DIR/lock/*" -print -quit)" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
           fi
-        fi
-        if [ "$COMPILER_SAVED" = success ]; then prune "hg5585f-ct-ccache-v1-$PLATFORM-"; fi
 
-    - name: Upload ITB firmware
-      if: success() && steps.compile.outputs.status == 'success'
-      uses: actions/upload-artifact@v4
-      with:
-        name: firmware-${{ github.run_number }}
-        path: openwrt/bin/targets/airoha/an7581/*.itb
-        if-no-files-found: error
+      - name: Save compiler progress
+        id: save-compiler
+        if: always() && !cancelled() && steps.compiler-ready.outputs.present == 'true' && (env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '重新编译')
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /workdir/openwrt/.ccache
+          key: hg5585f-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-    # Keep the current run plus the six newest completed runs in the Actions history.
-    - name: Keep latest 7 workflow runs
-      if: always()
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
-      run: |
-        gh run list --workflow "${{ github.workflow }}" --status completed --limit 200 --json databaseId,createdAt \
-          --jq 'sort_by(.createdAt) | reverse | .[6:] | .[].databaseId' |
-        while read -r ID; do
-          echo "deleting workflow run $ID"
-          gh run delete "$ID"
-        done
+      - name: Keep the latest cache in each saved category
+        if: always() && !cancelled() && (env.CACHE_MODE == '使用缓存' || env.CACHE_MODE == '重新编译') && (steps.save-downloads.outcome == 'success' || steps.save-tools.outcome == 'success' || steps.save-toolchain.outcome == 'success' || steps.save-compiler.outcome == 'success')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DOWNLOADS_SAVED: ${{ steps.save-downloads.outcome }}
+          TOOLS_SAVED: ${{ steps.save-tools.outcome }}
+          TOOLCHAIN_SAVED: ${{ steps.save-toolchain.outcome }}
+          COMPILER_SAVED: ${{ steps.save-compiler.outcome }}
+          PLATFORM: ${{ runner.os }}-${{ runner.arch }}
+        run: |
+          keep_latest() {
+            gh cache list --key "$1" --sort created_at --order desc --limit 100 \
+              --json id --jq '.[1:][].id' |
+            while IFS= read -r cache_id; do gh cache delete "$cache_id"; done
+          }
+          if [ "$DOWNLOADS_SAVED" = success ]; then keep_latest 'hg5585f-dl-v1-'; fi
+          if [ "$TOOLS_SAVED" = success ]; then keep_latest 'hg5585f-tools-v1-'; fi
+          if [ "$TOOLCHAIN_SAVED" = success ]; then keep_latest 'hg5585f-toolchain-v1-'; fi
+          if [ "$COMPILER_SAVED" = success ]; then keep_latest "hg5585f-ccache-v1-$PLATFORM-"; fi
+
+      - name: Upload validated firmware
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hg5585f-ct-${{ github.run_number }}
+          path: openwrt/bin/targets/airoha/an7581/*fiberhome_hg5585f-ct-*.itb
+          if-no-files-found: error
+
+      - name: Keep the current run and six completed runs
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW_FILE: hg5585f-ct-builder.yml
+        run: |
+          gh run list --workflow "$WORKFLOW_FILE" --status completed --limit 200 --json databaseId,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[6:] | .[].databaseId' |
+          while IFS= read -r id; do gh run delete "$id"; done

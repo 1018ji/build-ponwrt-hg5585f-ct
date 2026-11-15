@@ -1,0 +1,4 @@
+*.patch -text -whitespace
+*.yml text eol=lf
+*.json text eol=lf
+*.py text eol=lf

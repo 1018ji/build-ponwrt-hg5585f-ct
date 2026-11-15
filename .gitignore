@@ -1,4 +1,4 @@
 .DS_Store
 /openwrt/
-/dl/
 /output/
+__pycache__/

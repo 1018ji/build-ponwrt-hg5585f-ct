@@ -1,0 +1,583 @@
+diff --git a/files/etc/Wireless/RT2860AP/SingleSKU.dat b/files/etc/Wireless/RT2860AP/SingleSKU.dat
+new file mode 100644
+index 0000000000000000000000000000000000000000..d356536b6c28ed20cef1ae57cdab048750f7fd85
+--- /dev/null
++++ b/files/etc/Wireless/RT2860AP/SingleSKU.dat
+@@ -0,0 +1,62 @@
++# Single SKU Max Power Table
++# |CCK 1~11 | |    OFDM 6 ~ 54      | |             HT20 MCS 0 ~ 15                 | |             HT40 MCS 0 ~ 15                 |
++ch1 16 16 16 16 14 14 14 14 14 14 14 14 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch2 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
++ch3 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 12 12 12 12 12 12 12 12 12 12 12 12 12 12 12 12
++ch4 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
++ch5 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
++ch6 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
++ch7 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
++ch8 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16
++ch9 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 12 12 12 12 12 12 12 12 12 12 12 12 12 12 12 12
++ch10 18 18 18 18 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 16 
++ch11 16 16 16 16 14 14 14 14 14 14 14 14 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch12
++ch13
++ch14
++
++#   OFDM 6 ~ 54              | |                       HT20 MCS 0 ~ 15                       | |                   HT40 MCS 0 ~ 15                             | |               VHT80 MCS 0 ~ 9             |
++ch36 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch38 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch40 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch42 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch44 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch46 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch48 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch52 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 13 13 13 13 13 13 13 13 13 13
++ch54 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 13 13 13 13 13 13 13 13 13 13
++ch56 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 13 13 13 13 13 13 13 13 13 13
++ch58 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 13 13 13 13 13 13 13 13 13 13
++ch60 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch62 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 15 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch64 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 
++ch100 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch102 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch104 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13
++ch106 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13
++ch108 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13
++ch110 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13
++ch112 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13
++ch116 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch118 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch120 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch122 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch124 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch126 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch128 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch132 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 18 18 18 18 18 18 18 18 18 18
++ch134 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 18 18 18 18 18 18 18 18 18 18
++ch136 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 18 18 18 18 18 18 18 18 18 18
++ch140 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 13 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18 18
++ch149 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch151 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch153 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch155 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch157 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch159 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch161 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch165 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch169 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++ch173 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 21 21 21 21 19 19 19 19 17 17
++
++
+diff --git a/files/etc/Wireless/l1profile.dat b/files/etc/Wireless/l1profile.dat
+new file mode 100644
+index 0000000000000000000000000000000000000000..adb7bec34dccaf673a9d2f0d194938581a99cd91
+--- /dev/null
++++ b/files/etc/Wireless/l1profile.dat
+@@ -0,0 +1,14 @@
++Default
++INDEX0=MT7916
++INDEX0_profile_path=/tmp/profiles/dbdc.b0.dat;/tmp/profiles/dbdc.b1.dat
++INDEX0_EEPROM_offset=0x0
++INDEX0_EEPROM_size=0x1000
++INDEX0_EEPROM_name=mt7916-an-eeprom.bin
++INDEX0_main_ifname=ra0;rai0
++INDEX0_ext_ifname=ra;rai
++INDEX0_wds_ifname=wds;wdsi
++INDEX0_apcli_ifname=apcli;apclii
++INDEX0_mesh_ifname=mesh;meshi
++INDEX0_nvram_zone=dev1;dev2
++INDEX0_single_sku_path=/etc/wireless/mediatek/mt7916-sku.dat
++INDEX0_bf_sku_path=/etc/wireless/mediatek/mt7916-sku-bf.dat
+diff --git a/files/etc/Wireless/mediatek/mt7916-sku-bf.dat b/files/etc/Wireless/mediatek/mt7916-sku-bf.dat
+new file mode 100644
+index 0000000000000000000000000000000000000000..b7a18fce670ff2849e860317c2983aab40658c64
+--- /dev/null
++++ b/files/etc/Wireless/mediatek/mt7916-sku-bf.dat
+@@ -0,0 +1,71 @@
++# Single SKU Max Power Table (unit is 1 dBm)                                                   
++# 2.4G Channel                                                   
++Band: 2.4G MaxPower_4T MaxPower_3T MaxPower_2T                                                
++Ch1 14 14 13                                                
++Ch2 12 11 17                                                
++Ch3 16 11 12                                                
++Ch4 7 11 7                                                
++Ch5 12 15 13                                                
++Ch6 11 14 9                                                
++Ch7 10 15 6                                                
++Ch8 15 17 14                                                
++Ch9 6 9 6                                                
++Ch10 16 13 8                                                
++Ch11 14 14 7                                                
++Ch12 11 9 8                                                
++Ch13 6 11 14                                                
++Ch14 17 13 16                                                
++                                                   
++# 5G Channel                                                   
++Band: 5G MaxPower_4T MaxPower_3T MaxPower_2T                                                
++Ch184 15 10 14                                                
++Ch188 10 17 15                                                
++Ch192 6 12 8                                                
++Ch196 13 6 8                                                
++Ch8 12 13 11                                                
++Ch12 11 10 16                                                
++Ch16 12 13 11                                                
++Ch36 9 9 12                                                
++Ch40 7 15 7                                                
++Ch44 17 15 13                                                
++Ch48 8 7 8                                                
++Ch52 8 11 10                                                
++Ch56 11 10 11                                                
++Ch60 7 6 15                                                
++Ch64 13 16 11                                                
++Ch68 6 9 13                                                
++Ch72 13 16 17                                                
++Ch76 12 13 6                                                
++Ch80 17 14 6                                                
++Ch84 11 7 7                                                
++Ch88 9 8 17                                                
++Ch92 16 8 12                                                
++Ch96 16 13 6                                                
++Ch100 8 7 13                                                
++Ch104 13 14 10                                                
++Ch108 14 8 6                                                
++Ch112 16 17 12                                                
++Ch116 16 13 12                                                
++Ch120 7 10 7                                                
++Ch124 14 13 9                                                
++Ch128 17 10 17                                                
++Ch132 12 6 11                                                
++Ch136 17 17 10                                                
++Ch140 6 15 6                                                
++Ch144 12 7 10                                                
++Ch149 9 12 16                                                
++Ch153 10 15 11                                                
++Ch157 8 8 14                                                
++Ch161 11 6 7                                                
++Ch165 11 7 15                                                
++Ch169 17 6 13                                                
++Ch173 8 15 12                                                
++Ch177 10 15 7                                                
++Ch181 13 11 10                                                
++                                                   
++                                                   
++                                                   
++                                                   
++                                                   
++                                                   
++                                                   
+diff --git a/files/etc/Wireless/mediatek/mt7916-sku.dat b/files/etc/Wireless/mediatek/mt7916-sku.dat
+new file mode 100644
+index 0000000000000000000000000000000000000000..2296b53822b8e1d0056320ee93a932c520616d80
+--- /dev/null
++++ b/files/etc/Wireless/mediatek/mt7916-sku.dat
+@@ -0,0 +1,64 @@
++# Single SKU Max Power Table (unit is 1 dBm)                                                       
++# 2.4G Channel CCK    OFDM        VHT20          VHT40          TxStreamCapability_Delta   TxSpatialStream_Delta                   
++Band: 2.4G CCK_1M CCK_2M CCK_5.5M CCK_11M OFDM_6M OFDM_9M OFDM_12M OFDM_18M OFDM_24M OFDM_36M OFDM_48M OFDM_54M VHT20_MCS0 VHT20_MCS1 VHT20_MCS2 VHT20_MCS3 VHT20_MCS4 VHT20_MCS5 VHT20_MCS6 VHT20_MCS7 VHT20_MCS8 VHT20_MCS9 VHT40_MCS0 VHT40_MCS1 VHT40_MCS2 VHT40_MCS3 VHT40_MCS4 VHT40_MCS5 VHT40_MCS6 VHT40_MCS7 VHT40_MCS8 VHT40_MCS9 Txstream_3T Txstream_2T Txstream_1T Txstream_1SS Txstream_2SS Txstream_3SS Txstream_4SS                
++Ch1 16  12  15  17  18  11 10 15 15  15  18  15 10 16 20 11  17  13  9 8 20 1 3 6 6 3 1 0                
++Ch2 11  19  19  11  15  18 17 16 20  14  13  11 14 10 19 17  18  9  15 18 8 1 3 6 6 3 1 0                
++Ch3 13  11  14  12  11  12 9 18 14  14  19  17 11 16 20 17  20  8  18 8 18 1 3 6 6 3 1 0                
++Ch4 13  14  15  10  18  9 10 10 20  13  8  13 8 10 20 17  18  13  17 19 20 1 3 6 6 3 1 0                
++Ch5 10  12  14  12  9  15 19 9 8  17  11  13 8 17 9 20  16  11  16 13 8 1 3 6 6 3 1 0                
++Ch6 20  9  15  11  10  17 16 8 18  17  13  9 18 13 15 9  13  14  14 12 17 1 3 6 6 3 1 0                
++Ch7 11  19  20  17  15  16 17 9 19  20  12  14 15 11 14 11  16  12  8 20 18 1 3 6 6 3 1 0                
++Ch8 13  9  15  14  14  10 11 13 13  12  10  18 10 15 12 9  19  15  18 14 13 1 3 6 6 3 1 0                
++Ch9 18  9  19  20  15  15 8 9 18  14  17  8 10 13 12 11  8  14  10 13 11 1 3 6 6 3 1 0                
++Ch10 9  9  20  20  19  11 17 18 19  11  20  18 18 18 9 19  10  8  12 17 16 1 3 6 6 3 1 0                
++Ch11 15  11  8  8  12  9 18 18 8  9  17  13 15 9 9 11  19  10  11 14 20 1 3 6 6 3 1 0                
++Ch12 11  13  11  15  20  8 11 19 19  9  9  15 17 11 17 20  17  12  16 16 8 1 3 6 6 3 1 0                
++Ch13 8  9  18  12  9  12 15 14 13  15  18  13 15 13 20 14  19  12  20 17 9 1 3 6 6 3 1 0                
++Ch14 12  19  8  16  12  8 15 9 14  13  16  10 11 17 20 9  14  10  9 13 16 1 3 6 6 3 1 0                
++                                                       
++# 5G Channel OFDM        VHT20          VHT40          VHT80          VHT160          Txstream_Delta   TxSpatialStream_Delta   
++Band: 5G OFDM_6M OFDM_9M OFDM_12M OFDM_18M OFDM_24M OFDM_36M OFDM_48M OFDM_54M VHT20_MCS0 VHT20_MCS1 VHT20_MCS2 VHT20_MCS3 VHT20_MCS4 VHT20_MCS5 VHT20_MCS6 VHT20_MCS7 VHT20_MCS8 VHT20_MCS9 VHT40_MCS0 VHT40_MCS1 VHT40_MCS2 VHT40_MCS3 VHT40_MCS4 VHT40_MCS5 VHT40_MCS6 VHT40_MCS7 VHT40_MCS8 VHT40_MCS9 VHT80_MCS0 VHT80_MCS1 VHT80_MCS2 VHT80_MCS3 VHT80_MCS4 VHT80_MCS5 VHT80_MCS6 VHT80_MCS7 VHT80_MCS8 VHT80_MCS9 VHT160_MCS0 VHT160_MCS1 VHT160_MCS2 VHT160_MCS3 VHT160_MCS4 VHT160_MCS5 VHT160_MCS6 VHT160_MCS7 VHT160_MCS8 VHT160_MCS9 Txstream_3T Txstream_2T Txstream_1T Txstream_1SS Txstream_2SS Txstream_3SS Txstream_4SS
++Ch184 9  8  12  18 16 17 13  12  16  10 17 9 10 16  16  10  10 14 9 13 13  19  16  16 12 9 15 18  18  10  18 11 9 1 3 6 6 3 1 0
++Ch188 8  18  9  13 9 11 16  20  20  14 12 9 13 13  8  20  12 17 13 9 9  14  15  19 16 9 12 13  17  14  19 9 12 1 3 6 6 3 1 0
++Ch192 15  9  10  9 17 17 20  19  13  18 11 18 16 12  8  16  18 9 20 12 12  17  17  19 12 9 10 16  13  15  18 9 9 1 3 6 6 3 1 0
++Ch196 13  10  17  19 8 15 19  12  18  12 10 16 16 12  15  11  19 17 12 10 10  19  20  18 8 16 10 20  8  19  15 13 8 1 3 6 6 3 1 0
++Ch8 15  16  10  19 8 15 19  11  11  15 17 19 13 8  16  12  10 9 12 16 14  13  13  12 18 8 12 20  14  14  20 9 15 1 3 6 6 3 1 0
++Ch12 12  12  19  19 12 20 17  19  18  18 19 17 13 16  15  17  13 11 9 13 11  19  13  13 14 20 13 17  14  19  18 15 11 1 3 6 6 3 1 0
++Ch16 15  8  18  15 11 14 14  9  17  18 16 19 19 11  8  11  13 20 16 17 17  14  18  13 14 16 20 14  15  15  18 11 20 1 3 6 6 3 1 0
++Ch36 8  14  8  17 9 14 20  10  8  11 15 9 13 8  16  14  20 9 14 17 11  9  20  16 20 12 13 17  18  20  16 8 12 1 3 6 6 3 1 0
++Ch40 14  13  12  16 12 11 15  10  11  12 10 12 11 12  15  8  14 11 14 14 19  8  9  8 15 9 10 17  18  19  16 10 11 1 3 6 6 3 1 0
++Ch44 16  20  20  9 12 12 10  11  18  16 9 13 13 16  8  9  9 10 10 11 12  18  11  8 8 12 9 14  15  17  19 13 16 1 3 6 6 3 1 0
++Ch48 17  14  14  8 18 15 11  12  19  9 12 10 19 20  20  14  14 15 18 9 8  11  12  17 20 13 18 12  12  9  14 19 17 1 3 6 6 3 1 0
++Ch52 10  17  8  12 10 15 16  11  20  14 12 17 17 17  10  20  9 18 11 13 20  18  15  10 20 12 11 18  19  9  15 13 9 1 3 6 6 3 1 0
++Ch56 9  13  11  13 18 12 15  17  11  11 8 8 9 19  9  11  17 19 12 17 10  13  19  10 19 19 12 15  8  20  14 15 15 1 3 6 6 3 1 0
++Ch60 14  8  18  8 17 19 18  16  12  15 14 15 15 19  18  12  17 19 11 17 8  10  19  9 16 17 13 11  14  18  14 8 16 1 3 6 6 3 1 0
++Ch64 9  20  10  13 13 19 11  20  13  8 11 12 12 12  11  12  8 18 11 12 15  16  11  10 15 20 10 12  14  15  12 8 17 1 3 6 6 3 1 0
++Ch68 8  20  9  19 12 14 8  18  14  15 20 12 10 8  10  12  15 20 14 8 13  16  15  11 13 12 14 20  11  11  10 16 20 1 3 6 6 3 1 0
++Ch72 14  18  15  14 17 15 20  16  18  16 12 17 16 18  12  20  13 14 8 8 13  18  8  13 16 8 18 9  14  8  17 13 17 1 3 6 6 3 1 0
++Ch76 8  11  17  15 15 16 10  11  12  13 11 14 20 17  18  12  11 17 13 11 13  16  15  18 11 11 13 17  13  9  11 17 14 1 3 6 6 3 1 0
++Ch80 16  19  19  11 15 8 13  20  13  17 11 15 14 19  14  20  16 8 15 10 12  16  16  17 8 8 19 20  13  11  14 16 11 1 3 6 6 3 1 0
++Ch84 9  11  13  11 16 16 13  20  8  15 19 16 17 11  11  10  16 16 19 19 13  15  12  9 19 13 19 19  18  18  12 17 13 1 3 6 6 3 1 0
++Ch88 14  14  14  9 16 13 16  17  12  19 8 19 12 12  10  12  17 10 13 19 15  12  10  14 9 17 8 10  19  10  11 9 11 1 3 6 6 3 1 0
++Ch92 11  20  9  19 18 15 11  9  11  20 13 15 9 10  10  12  17 20 13 9 20  12  17  15 17 17 19 9  20  13  16 13 20 1 3 6 6 3 1 0
++Ch96 13  20  13  11 17 8 18  8  17  14 18 9 13 16  19  13  20 11 19 19 17  12  8  20 9 14 18 10  8  20  13 14 16 1 3 6 6 3 1 0
++Ch100 13  20  11  13 20 14 15  13  20  20 13 16 14 9  20  10  18 18 14 12 20  17  20  8 12 14 19 20  15  17  20 10 9 1 3 6 6 3 1 0
++Ch104 9  19  10  17 12 9 12  14  17  10 13 14 15 16  19  8  10 8 9 17 11  13  10  16 17 20 10 11  17  18  10 8 17 1 3 6 6 3 1 0
++Ch108 15  14  16  17 12 11 13  16  14  10 12 16 17 12  12  17  18 10 14 18 13  13  16  10 16 20 9 20  14  8  8 12 13 1 3 6 6 3 1 0
++Ch112 11  13  19  14 8 10 16  10  11  16 13 20 13 14  10  14  8 13 17 12 16  16  10  16 11 17 19 12  19  16  18 11 10 1 3 6 6 3 1 0
++Ch116 8  15  16  13 11 11 12  11  8  9 15 12 8 9  16  20  18 14 11 17 13  15  9  8 11 16 20 13  11  14  13 16 9 1 3 6 6 3 1 0
++Ch120 9  19  12  11 15 17 11  16  8  11 8 14 17 17  14  15  16 11 19 14 20  9  14  15 19 15 19 11  20  18  13 17 11 1 3 6 6 3 1 0
++Ch124 11  16  15  17 11 14 18  11  14  10 8 14 18 17  11  17  15 18 15 15 10  11  18  18 16 13 10 10  18  17  20 13 15 1 3 6 6 3 1 0
++Ch128 8  13  14  17 10 19 15  9  11  11 17 20 11 20  11  12  18 14 8 16 18  12  18  16 12 8 20 14  17  14  19 14 14 1 3 6 6 3 1 0
++Ch132 10  18  8  11 16 17 18  11  10  8 10 14 17 9  13  12  18 20 11 19 17  12  14  13 17 17 13 19  16  8  10 10 11 1 3 6 6 3 1 0
++Ch136 13  17  10  11 8 20 11  11  19  20 12 14 11 12  16  10  9 18 16 11 19  14  19  12 11 13 13 17  18  19  14 18 18 1 3 6 6 3 1 0
++Ch140 17  11  19  17 14 14 12  15  16  12 20 8 8 18  13  10  18 17 10 19 18  17  12  17 15 12 13 14  8  18  11 12 16 1 3 6 6 3 1 0
++Ch144 9  18  13  8 11 14 17  18  16  17 10 17 14 8  13  20  20 14 11 16 9  14  16  19 18 14 9 18  12  19  16 11 16 1 3 6 6 3 1 0
++Ch149 17  10  11  8 18 20 16  13  18  19 19 9 16 9  16  13  16 18 14 11 14  20  9  17 18 10 14 10  20  10  11 13 9 1 3 6 6 3 1 0
++Ch153 14  13  16  19 9 12 16  15  20  18 14 13 17 11  11  19  9 12 9 8 9  11  11  9 12 14 20 8  16  11  15 16 16 1 3 6 6 3 1 0
++Ch157 11  18  19  15 20 8 14  19  17  12 15 16 13 13  19  9  20 12 17 20 12  11  8  14 13 18 14 12  12  13  13 19 20 1 3 6 6 3 1 0
++Ch161 10  17  14  17 11 19 20  18  8  17 10 18 17 18  17  8  9 18 16 14 9  20  19  12 15 12 15 11  12  19  10 20 18 1 3 6 6 3 1 0
++Ch165 11  10  12  16 13 11 12  16  11  11 15 11 20 20  10  15  8 20 17 9 15  12  16  18 17 8 14 10  19  12  17 17 20 1 3 6 6 3 1 0
++Ch169 17  19  12  20 13 17 15  16  18  11 8 17 9 15  12  16  18 12 17 8 15  17  19  8 11 10 18 16  16  20  12 16 13 1 3 6 6 3 1 0
++Ch173 19  17  14  14 18 20 13  9  11  18 19 11 15 13  8  20  20 20 15 14 17  12  19  20 15 16 17 17  12  8  12 16 9 1 3 6 6 3 1 0
++Ch177 8  17  10  13 12 18 18  18  17  12 10 19 11 8  16  18  13 9 18 13 8  14  11  9 12 14 11 15  13  14  13 19 16 1 3 6 6 3 1 0
++Ch181 20  19  19  8 12 14 14  12  20  16 13 10 19 11  8  18  10 9 15 11 12  12  14  19 18 18 20 20  14  14  17 14 14 1 3 6 6 3 1 0
+diff --git a/files/etc/hotplug.d/firmware/10-mt7916-an-eeprom b/files/etc/hotplug.d/firmware/10-mt7916-an-eeprom
+new file mode 100755
+index 0000000000000000000000000000000000000000..0a1ef7f8756639eeee9bdee812539ac0b4ed1ee3
+--- /dev/null
++++ b/files/etc/hotplug.d/firmware/10-mt7916-an-eeprom
+@@ -0,0 +1,38 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-2.0-only
++
++[ "$FIRMWARE" = "mt7916-an-eeprom.bin" ] || [ "$FIRMWARE" = "mediatek/mt7916_eeprom.bin" ] || exit 0
++[ -e "/lib/firmware/$FIRMWARE" ] && exit 0
++
++. /lib/functions.sh
++. /lib/upgrade/nand.sh
++
++case "$(board_name)" in
++	znxt,zn515xg-d|h3c,hm2004-du)
++		# These boards ship an RF template and require the DT-selected
++		# per-chip iCal merge before radio initialization can succeed.
++		calfile=/lib/firmware/mediatek/mt7916_eeprom.bin
++		[ "$(wc -c < "$calfile")" -eq 4096 ] || exit 1
++		[ "$(hexdump -v -n 2 -e '1/1 "%02x"' "$calfile")" = "1679" ] || exit 1
++		ln -s "$calfile" "/lib/firmware/$FIRMWARE"
++		exit $?
++		;;
++	fiberhome,hg5585f-ct|fiberhome,hg5585f-cu) ;;
++	*) exit 1 ;;
++esac
++ubidev=$(nand_find_ubi ubi)
++[ -n "$ubidev" ] || exit 1
++volume=$(nand_find_volume "$ubidev" factory)
++[ -n "$volume" ] || exit 1
++
++umask 077
++mkdir -p /lib/firmware
++calfile=$(mktemp /lib/firmware/.mt7916-eeprom.XXXXXX) || exit 1
++trap 'rm -f "$calfile"' EXIT
++# This layout is shared with the mainline HG5585F factory NVMEM cell.
++dd if="/dev/$volume" of="$calfile" bs=4096 skip=1 count=1 2>/dev/null || exit 1
++[ "$(wc -c < "$calfile")" -eq 4096 ] || exit 1
++[ "$(hexdump -v -n 2 -e '1/1 "%02x"' "$calfile")" = "1679" ] || exit 1
++mv "$calfile" "/lib/firmware/mt7916-an-eeprom.bin"
++mkdir -p /lib/firmware/mediatek
++ln -sf /lib/firmware/mt7916-an-eeprom.bin /lib/firmware/mediatek/mt7916_eeprom.bin
+diff --git a/files/etc/hotplug.d/net/99-wifi-affinity b/files/etc/hotplug.d/net/99-wifi-affinity
+new file mode 100755
+index 0000000000000000000000000000000000000000..611e72c02bcaee743e9e4e52367fa945a8c85f15
+--- /dev/null
++++ b/files/etc/hotplug.d/net/99-wifi-affinity
+@@ -0,0 +1,8 @@
++#!/bin/sh
++if [ "$ACTION" = "add" ]; then
++    case "$DEVICENAME" in
++        phy*-ap0)
++            /usr/sbin/pin-wifi-cpus.sh
++            ;;
++    esac
++fi
+diff --git a/files/etc/init.d/mt7916-an-eeprom b/files/etc/init.d/mt7916-an-eeprom
+new file mode 100755
+index 0000000000000000000000000000000000000000..07019d484da67e617e74b371b80ffaf661329250
+--- /dev/null
++++ b/files/etc/init.d/mt7916-an-eeprom
+@@ -0,0 +1,21 @@
++#!/bin/sh /etc/rc.common
++# SPDX-License-Identifier: GPL-2.0-only
++
++# Prepare calibration before mtwifi_service (09) and kmodloader (10).
++# Opening a radio from a hotplug callback can otherwise wait for firmware
++# whose extraction is queued behind that same callback on first boot.
++START=08
++
++start() {
++	. /lib/functions.sh
++
++	case "$(board_name)" in
++		fiberhome,hg5585f-ct|fiberhome,hg5585f-cu|znxt,zn515xg-d|h3c,hm2004-du) ;;
++		*) return 0 ;;
++	esac
++
++	FIRMWARE=mt7916-an-eeprom.bin /bin/sh /etc/hotplug.d/firmware/10-mt7916-an-eeprom || {
++		logger -t mt7916-an-eeprom "Failed to prepare radio calibration"
++		return 1
++	}
++}
+diff --git a/files/usr/sbin/pin-wifi-cpus.sh b/files/usr/sbin/pin-wifi-cpus.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..a995eb89c3743cdc60d78f30ff7974711980757b
+--- /dev/null
++++ b/files/usr/sbin/pin-wifi-cpus.sh
+@@ -0,0 +1,21 @@
++#!/bin/sh
++# 精确匹配内核线程 comm，将 mt76-tx 与 6 个 napi/phy0-0 线程打散到 4 个核心
++idx=0
++for pid in $(ls /proc | grep '^[0-9]*$' | sort -n); do
++    [ -r "/proc/$pid/comm" ] || continue
++    read -r cname < "/proc/$pid/comm" 2>/dev/null || continue
++    case "$cname" in
++        mt76-tx*)
++            taskset -p 8 "$pid" >/dev/null 2>&1
++            ;;
++        napi/phy0-0)
++            case $((idx % 6)) in
++                0|1|2) mask=1 ;;
++                3)     mask=2 ;;
++                4|5)   mask=4 ;;
++            esac
++            taskset -p "$mask" "$pid" >/dev/null 2>&1
++            idx=$((idx + 1))
++            ;;
++    esac
++done
+diff --git a/target/linux/airoha/base-files/lib/preinit/07_an7581_bsp_wifi_mac b/target/linux/airoha/base-files/lib/preinit/07_an7581_bsp_wifi_mac
+new file mode 100755
+index 0000000000000000000000000000000000000000..553d7d243d53fc6ef1a5688665c4a12231af2b90
+--- /dev/null
++++ b/target/linux/airoha/base-files/lib/preinit/07_an7581_bsp_wifi_mac
+@@ -0,0 +1,69 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++an7581_bsp_valid_wifi_mac() {
++	[ "$1" != "00:00:00:00:00:00" ] &&
++		printf '%s\n' "$1" | grep -Eq '^[[:xdigit:]][02468aAcCeE](:[[:xdigit:]]{2}){5}$'
++}
++
++an7581_bsp_wifi_mac() {
++	local board ubidev volume factory base mac24 mac5 mac6
++	case "$(uname -r)" in 5.4.*|6.18.*|7.3|7.3.*) ;; *) return 0 ;; esac
++	board=$(board_name)
++	case "$board" in gemtek,xr1710g-ubi|znxt,zn515xg-d|h3c,hm2004-du|nokia,valyrian|fiberhome,hg5585f-ct|fiberhome,hg5585f-ct-usb-sfp|fiberhome,hg5585f-cu|fiberhome,hg5585f-cu-usb-sfp) ;; *) return 0 ;; esac
++	. /lib/functions/system.sh
++	. /lib/upgrade/nand.sh
++	if [ "$board" = "nokia,valyrian" ]; then
++		factory=$(find_mmc_part factory)
++		[ -n "$factory" ] || return 0
++	else
++		ubidev=$(nand_find_ubi ubi)
++		[ -n "$ubidev" ] || return 0
++		volume=$(nand_find_volume "$ubidev" factory)
++		[ -n "$volume" ] || return 0
++		factory="/dev/$volume"
++	fi
++	case "$board" in
++	gemtek,xr1710g-ubi)
++		# Match the installed board DT: factory LAN base plus 1/2/3.
++		base=$(get_mac_binary "$factory" 24576)
++		an7581_bsp_valid_wifi_mac "$base" || return 0
++		mac24=$(macaddr_add "$base" 1)
++		mac5=$(macaddr_add "$base" 2)
++		mac6=$(macaddr_add "$base" 3)
++		an7581_bsp_valid_wifi_mac "$mac6" || return 0
++		;;
++	fiberhome,hg5585f-ct|fiberhome,hg5585f-ct-usb-sfp|fiberhome,hg5585f-cu|fiberhome,hg5585f-cu-usb-sfp)
++		base=$(get_mac_binary "$factory" 8192)
++		an7581_bsp_valid_wifi_mac "$base" || return 0
++		# Keep radios outside the base/base+1 wired address pair.
++		mac24=$(macaddr_add "$base" 6)
++		mac5=$(macaddr_add "$base" 7)
++		;;
++	znxt,zn515xg-d)
++		base=$(dd if="$factory" bs=1 skip=1314852 count=12 2>/dev/null | sed 's/../&:/g;s/:$//')
++		an7581_bsp_valid_wifi_mac "$base" || return 0
++		mac24=$(macaddr_add "$base" 4)
++		mac5=$(macaddr_add "$base" 5)
++		;;
++	h3c,hm2004-du)
++		mac24=$(get_mac_binary "$factory" 80)
++		mac5=$(get_mac_binary "$factory" 64)
++		;;
++	nokia,valyrian)
++		base=$(get_mac_binary "$factory" 2883584)
++		an7581_bsp_valid_wifi_mac "$base" || return 0
++		mac24=$(macaddr_add "$base" 6)
++		mac5=$(macaddr_add "$base" 7)
++		mac6=$(macaddr_add "$base" 8)
++		an7581_bsp_valid_wifi_mac "$mac6" || return 0
++		;;
++	esac
++	# Per-device addresses must be ready before mtwifi_service writes profiles.
++	an7581_bsp_valid_wifi_mac "$mac24" || return 0
++	an7581_bsp_valid_wifi_mac "$mac5" || return 0
++	printf '%s\n' "$mac24" > /tmp/mtwifi-macaddr.0
++	printf '%s\n' "$mac5" > /tmp/mtwifi-macaddr.1
++	[ -z "$mac6" ] || printf '%s\n' "$mac6" > /tmp/mtwifi-macaddr.2
++}
++
++boot_hook_add preinit_main an7581_bsp_wifi_mac
+diff --git a/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-npu.dts b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-npu.dts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9312cec2f310c67f63bc89ba06ae6ff76bab1d4
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-npu.dts
+@@ -0,0 +1,43 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++
++#include "an7581-fiberhome-hg5585f-ct-wed.dts"
++
++/* Legacy NPU receive plus host-managed PPE and WED transmit. */
++&{/reserved-memory} {
++	npu_rx_pkt: npu-rx-pkt@98000000 {
++		no-map;
++		reg = <0x0 0x98000000 0x0 0x600000>;
++	};
++
++	npu_rx_ba: npu-rx-ba@98600000 {
++		no-map;
++		reg = <0x0 0x98600000 0x0 0x80000>;
++	};
++};
++
++&npu {
++	reg = <0x0 0x1e900000 0x0 0x313000>,
++	      <0x0 0x1fb30000 0x0 0x2b0>,
++	      <0x0 0x1e800000 0x0 0x78000>;
++	reg-names = "npu", "rx-copy", "rx-sram";
++	resets = <&scuclk EN7581_NPU_RST>, <&scuclk EN7581_GDMA_RST>;
++	reset-names = "npu", "rx-copy";
++	memory-region = <&npu_binary>, <&npu_rx_pkt>, <&npu_rx_ba>;
++	memory-region-names = "binary", "pkt", "ba";
++	airoha,wlan-firmware-abi = "hg5585f-2024";
++	firmware-name = "airoha/en7581_MT7916_npu_rv32.bin",
++			"airoha/en7581_MT7916_npu_data.bin";
++};
++
++&eth {
++	airoha,hg5585f-ppe;
++};
++
++&pcie1 {
++	pcie@0,0 {
++		wifi@0,0 {
++			airoha,hg5585f-rx-offload;
++			airoha,npu-rx-ppe;
++		};
++	};
++};
+diff --git a/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-wed.dts b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-wed.dts
+new file mode 100644
+index 0000000000000000000000000000000000000000..99cdb28dd98c5b1bf0fd50bc4003f8d234599c71
+--- /dev/null
++++ b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct-wed.dts
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++
++#include "an7581-fiberhome-hg5585f-ct.dts"
++
++/* Use the existing NPU/PPE ABI. The MT7916 2024 RX ABI is separate. */
++&npu {
++	firmware-name = "airoha/en7581_npu_rv32.bin",
++			"airoha/en7581_npu_data.bin";
++};
++
++&{/soc} {
++	hg5585f_wed1: wed@1fa03000 {
++		compatible = "airoha,en7581-wed";
++		reg = <0x0 0x1fa03000 0x0 0xb00>,
++		      <0x0 0x1fa06400 0x0 0x400>;
++		reg-names = "wed", "wdma";
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
++		airoha,pcie = <&pcie1>;
++	};
++};
++
++&pcie1 {
++	pcie@0,0 {
++		wifi@0,0 {
++			airoha,wed = <&hg5585f_wed1>;
++		};
++	};
++};
+diff --git a/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct.dts b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct.dts
+index 7824c6e30197c846597b93f45069c4b40d688dd8..74ad49db797cc3e926e113ccdc0567ef9e2be0bb 100644
+--- a/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct.dts
++++ b/target/linux/airoha/dts/an7581-fiberhome-hg5585f-ct.dts
+@@ -7,3 +7,9 @@
+ 	model = "FiberHome HG5585F CT";
+ 	compatible = "fiberhome,hg5585f-ct", "airoha,an7581", "airoha,en7581";
+ };
++
++/* Telecom (CT) hardware physically features USB 2.0 only; lock usb0 to USB 2.0 PHY */
++&usb0 {
++	mediatek,u3p-dis-msk = <0x1>;
++	phys = <&usb0_phy PHY_TYPE_USB2>;
++};
+diff --git a/target/linux/airoha/image/an7581.mk b/target/linux/airoha/image/an7581.mk
+index 4d697a635a03e54ce9966ad31263210eb734435e..f6c6f47240ba7b016be4362a6c26bbec00afe847 100644
+--- a/target/linux/airoha/image/an7581.mk
++++ b/target/linux/airoha/image/an7581.mk
+@@ -210,36 +210,43 @@ define Device/fiberhome_hg5585f-ct
+ endef
+ TARGET_DEVICES += fiberhome_hg5585f-ct
+ 
+-define Device/fiberhome_hg5585f-cu
++# Separate image for hardware validation; preserve the native board profile.
++define Device/fiberhome_hg5585f-ct-wed
+   $(call Device/fiberhome_hg5585f-common)
+   DEVICE_MODEL := HG5585F
+-  DEVICE_VARIANT := CU
+-  DEVICE_DTS := an7581-fiberhome-hg5585f-cu
+-  SUPPORTED_DEVICES += fiberhome,hg5585f-cu-usb-sfp
++  DEVICE_VARIANT := CT WED TX experimental
++  DEVICE_DTS := an7581-fiberhome-hg5585f-ct-wed
++  DEVICE_PACKAGES += kmod-phy-maxlinear
++  SUPPORTED_DEVICES := fiberhome,hg5585f-ct
+   $(call Device/fiberhome_hg5585f-images)
+ endef
+-TARGET_DEVICES += fiberhome_hg5585f-cu
++TARGET_DEVICES += fiberhome_hg5585f-ct-wed
+ 
+-define Device/fiberhome_hg5585f-ct-usb-sfp
++define Device/fiberhome_hg5585f-ct-npu
+   $(call Device/fiberhome_hg5585f-common)
+   DEVICE_MODEL := HG5585F
+-  DEVICE_VARIANT := CT-USB-SFP
+-  DEVICE_DTS := an7581-fiberhome-hg5585f-ct-usb-sfp
++  DEVICE_VARIANT := CT NPU RX PPE WED experimental
++  DEVICE_DTS := an7581-fiberhome-hg5585f-ct-npu
+   DEVICE_PACKAGES += kmod-phy-maxlinear
+-  SUPPORTED_DEVICES += fiberhome,hg5585f-ct
++  SUPPORTED_DEVICES := fiberhome,hg5585f-ct
+   $(call Device/fiberhome_hg5585f-images)
+ endef
+-TARGET_DEVICES += fiberhome_hg5585f-ct-usb-sfp
++TARGET_DEVICES += fiberhome_hg5585f-ct-npu
+ 
+-define Device/fiberhome_hg5585f-cu-usb-sfp
++# CU (Unicom) variant shares the HG5585F UBI layout and common MT7916D platform,
++# but uses its own CU DTS and internal switch PHY mapping.
++define Device/fiberhome_hg5585f-cu
+   $(call Device/fiberhome_hg5585f-common)
+   DEVICE_MODEL := HG5585F
+-  DEVICE_VARIANT := CU-USB-SFP
+-  DEVICE_DTS := an7581-fiberhome-hg5585f-cu-usb-sfp
+-  SUPPORTED_DEVICES += fiberhome,hg5585f-cu
++  DEVICE_VARIANT := CU
++  DEVICE_DTS := an7581-fiberhome-hg5585f-cu
+   $(call Device/fiberhome_hg5585f-images)
+ endef
+-TARGET_DEVICES += fiberhome_hg5585f-cu-usb-sfp
++TARGET_DEVICES += fiberhome_hg5585f-cu
++
++# Disabled: non-standard USB 3.0 / SFP variants are intentionally excluded.
++# TARGET_DEVICES += fiberhome_hg5585f-ct-usb-sfp
++# TARGET_DEVICES += fiberhome_hg5585f-cu-usb-sfp
+ 
+ # Both models share the UBI boot chain and store device data in factory.
+ define Device/znxt_zn50xg-d-common
