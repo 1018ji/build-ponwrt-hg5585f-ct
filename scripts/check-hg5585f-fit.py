@@ -61,7 +61,7 @@ def verify_dtb(data):
             parent=parent.rsplit('/',1)[0]
     if 'nvmem-cells' not in tree.nodes[WIFI]:
         raise ValueError('MT7916 EEPROM cell is missing')
-    if tree.prop(WIFI,'airoha,wed') != tree.cells(WED,'phandle'):
+    if tree.cells(WIFI,'airoha,wed') != tree.cells(WED,'phandle'):
         raise ValueError('WED phandle is not attached to MT7916')
     if tree.prop(ETH,'airoha,hg5585f-ppe') != b'':
         raise ValueError('host PPE flag missing')
