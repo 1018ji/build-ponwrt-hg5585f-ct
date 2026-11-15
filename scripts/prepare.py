@@ -77,6 +77,10 @@ def config(path, kernel=False):
             key, value = line.split('=', 1)
             assert key not in values, f'Duplicate option: {key}'
             values[key] = value
+        elif line.startswith('# CONFIG_') and line.endswith(' is not set'):
+            key = line[2:-len(' is not set')]
+            assert key not in values, f'Duplicate option: {key}'
+            values[key] = 'n'
     if kernel:
         required = ['NET_AIROHA', 'NET_AIROHA_NPU', 'NET_AIROHA_WED',
                     'NET_AIROHA_NPU_HG5585F', 'NET_AIROHA_PPE_HG5585F',
@@ -105,6 +109,9 @@ def config(path, kernel=False):
             assert values.get('CONFIG_PACKAGE_' + package) in ('y', 'm'), f'Missing hardware package: {package}'
     for option in required:
         assert values.get('CONFIG_' + option) == 'y', f'Missing CONFIG_{option}=y'
+    if kernel:
+        assert values.get('CONFIG_NET_MEDIATEK_SOC') == 'n', \
+            'CONFIG_NET_MEDIATEK_SOC must be explicitly disabled for Airoha WED-only builds'
     print('PASS: ' + ('built kernel' if kernel else 'generated firmware') + ' configuration')
 
 

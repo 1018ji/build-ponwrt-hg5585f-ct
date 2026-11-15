@@ -9,7 +9,7 @@
     },
     {
       "name": "0002-airoha-wifi-npu-wed-ppe.patch",
-      "sha256": "88d5b293fb147faa6601545faef2590c3886dd1a0207a3834aab3c52febc1274"
+      "sha256": "bd3b53036965f452f7da708fa505b9a4471d2ce196e36ec50190fddbaa3d9064"
     },
     {
       "name": "0003-hg5585f-firmware-and-validation.patch",
@@ -83,8 +83,9 @@
       "executable": false
     },
     "target/linux/airoha/an7581/config-6.18": {
-      "sha256": "36ffdbade2bfc3d56c816783c594c763bff95df5eebd04ae3053b30f63ee5678",
-      "executable": false
+      "sha256": "ebe1a1bffd43625c37c550aa97e4f3564148af891b6efc16977820eec903bfab",
+      "executable": false,
+      "corrected_in_recipe": "explicitly disables unused MediaTek Ethernet Kconfig symbol; preserves WED=y"
     },
     "target/linux/airoha/patches-6.18/931-net-airoha-fix-wan-ipv6-pppoe-flow-offload.patch": {
       "sha256": "3bbedbdc62732419e37a4b34ef35d8ab0e442c3c13989e1175bee7f3413aaa64",
