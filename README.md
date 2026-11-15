@@ -47,11 +47,11 @@ bash diy-part2.sh "$PWD/openwrt/.config"
 
 ## Wi-Fi 构建路径
 
-HG5585F 使用 ZN504 工程验证过的原生 MT7916 Wi-Fi 路径：设备树保留 PCIe、EEPROM 和标准 MT7915e 驱动，不接管 MT7916 的 RX DMA 到实验性 HG5585F NPU/WED 后端。通用 EN7581 NPU 固件仍可用于 SoC NPU/PPE。
+HG5585F 使用分阶段的 Wi-Fi 加速方案：MT7916 RX 保持原生 mt76 DMA，Airoha WED 只接管 TX，host PPE 负责发送侧硬件路径。实验性 HG5585F NPU RX 接管、legacy RX ring 和 Linux RX 重组不启用，避免影响管理帧和关联。
 
-构建配置保留 `kmod-mt7915e`、`kmod-mt7916-firmware`、`kmod-mac80211` 和标准 `airoha-en7581-npu-firmware`。HG5585F 的 NPU RX/WED 实验开关和默认 offload FIT overlay 已关闭，先保证 Wi-Fi6 原生收发稳定。
+构建配置启用 `CONFIG_KERNEL_NET_AIROHA_WED`、`CONFIG_KERNEL_NET_AIROHA_PPE_HG5585F`、`kmod-mt7915e`、`kmod-mt7916-firmware` 和 HG5585F NPU 固件。默认 CT FIT 包含 WED TX 与 host PPE 设备树节点，但不包含 NPU RX reserved-memory/接管节点。
 
-编译结束会检查默认 FIT 设备树包含 HG5585F、MT7916 PCIe、EEPROM、NPU 和以太网节点；不会要求实验性 WED/RX 节点。
+编译结束会检查默认 FIT 设备树包含 HG5585F、MT7916 PCIe、EEPROM、WED 和 host PPE 节点。实机是否完成 WED attach、TX 计数是否增长，仍需用 iperf3 和 debugfs 验证。
 
 ## 缓存
 

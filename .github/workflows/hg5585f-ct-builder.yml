@@ -270,7 +270,7 @@ jobs:
           fi
           run make -j1 V=s
         }
-        # Refuse to upload images whose default DTB omits the native MT7916 Wi-Fi path.
+        # Refuse to upload images whose default DTB omits the WED TX and native MT7916 Wi-Fi path.
         python3 "$GITHUB_WORKSPACE/scripts/check-hg5585f-fit.py" bin/targets/airoha/an7581/*.itb
         echo "status=success" >> "$GITHUB_OUTPUT"
 
