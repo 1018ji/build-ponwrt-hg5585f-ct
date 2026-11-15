@@ -44,35 +44,24 @@ class Fdt:
 
 NPU='/soc/npu@1e900000'
 WIFI='/soc/pcie@1fc20000/pcie@0,0/wifi@0,0'
-WED='/soc/wed@1fa03000'
 ETH='/soc/ethernet@1fb50000'
 
 def verify_dtb(data):
     tree=Fdt(data)
-    if tree.string('/','model')!='FiberHome HG5585F CT':raise ValueError('wrong board model')
-    for node in [NPU,WIFI,WED,ETH]:
+    if tree.string('/','model')!='FiberHome HG5585F CT':
+        raise ValueError('wrong board model')
+    for node in [NPU,WIFI,ETH]:
         parent=node
         while parent:
-            if parent not in tree.nodes:raise ValueError('missing enabled node: '+parent)
-            if 'status' in tree.nodes[parent] and tree.string(parent,'status') not in ['okay','ok']:raise ValueError('disabled hardware path: '+parent)
+            if parent not in tree.nodes:
+                raise ValueError('missing enabled node: '+parent)
+            if 'status' in tree.nodes[parent] and tree.string(parent,'status') not in ['okay','ok']:
+                raise ValueError('disabled hardware path: '+parent)
             parent=parent.rsplit('/',1)[0]
-    for node,key in [(WIFI,'airoha,hg5585f-rx-offload'),(ETH,'airoha,hg5585f-ppe')]:
-        if tree.prop(node,key)!=b'':raise ValueError('expected boolean property')
-    if tree.string(NPU,'airoha,wlan-firmware-abi')!='hg5585f-2024':raise ValueError('wrong NPU firmware ABI')
-    if tree.prop(NPU,'firmware-name')!=b'airoha/hg5585f_npu_rv32.bin\0airoha/hg5585f_npu_data.bin\0':raise ValueError('wrong firmware pair')
-    if tree.prop(NPU,'memory-region-names')!=b'binary\0pkt\0ba\0':raise ValueError('wrong RX reservations')
-    if tree.string(WED,'compatible')!='airoha,en7581-wed':raise ValueError('wrong WED provider')
-    if tree.cells(NPU,'reg')!=(0,0x1e900000,0,0x313000,0,0x1fb30000,0,0x2b0):raise ValueError('wrong NPU/GDMA mappings')
-    if tree.cells(WED,'reg')!=(0,0x1fa03000,0,0xb00,0,0x1fa06400,0,0x400):raise ValueError('wrong WED/WDMA mappings')
-    resets=tree.cells(NPU,'resets')
-    if len(resets)!=4 or resets[0]!=resets[2] or resets[1]!=8 or resets[3]!=38:raise ValueError('wrong exclusive NPU/GDMA resets')
-    if tree.prop(NPU,'reset-names')!=b'npu\0rx-copy\0':raise ValueError('wrong reset names')
-    for node,key,target in [(WIFI,'airoha,npu',NPU),(WIFI,'airoha,wed',WED),(WIFI,'airoha,eth',ETH)]:
-        if tree.cells(node,key)!=tree.cells(target,'phandle'):raise ValueError('wrong provider phandle')
-    memory=tree.cells(NPU,'memory-region')
-    for index,node,addr,size in [(1,'/reserved-memory/npu-rx-pkt@98000000',0x98000000,0x600000),(2,'/reserved-memory/npu-rx-ba@98600000',0x98600000,0x80000)]:
-        if tree.cells(node,'reg')!=(0,addr,0,size) or tree.prop(node,'no-map')!=b'':raise ValueError('wrong reserved memory')
-        if len(memory)!=3 or memory[index]!=tree.cells(node,'phandle')[0]:raise ValueError('wrong reserved memory phandle')
+    if 'nvmem-cells' not in tree.nodes[WIFI]:
+        raise ValueError('MT7916 EEPROM cell is missing')
+    if 'nvmem-cell-names' not in tree.nodes[WIFI]:
+        raise ValueError('MT7916 EEPROM cell name is missing')
     return tree
 
 def verify_fit(path):
@@ -103,7 +92,7 @@ def verify_fit(path):
             if offset<total or offset+size>path.stat().st_size:raise ValueError('external FDT outside image')
             stream.seek(offset);payload=stream.read(size)
         verify_dtb(payload)
-    print(f'PASS: {path.name}: default {default} directly boots CT NPU RX + host PPE + WED TX')
+    print(f'PASS: {path.name}: default {default} directly boots CT native MT7916 Wi-Fi')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
