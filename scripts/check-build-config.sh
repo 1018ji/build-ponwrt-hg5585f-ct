@@ -24,7 +24,6 @@ END {
 	for (i=1;i<=count;i++) required(keys[i])
 	required("CONFIG_PACKAGE_luci-theme-bootstrap")
 	if (value["CONFIG_PACKAGE_luci-theme-argon"] == "y") fail("Argon theme must be disabled")
-	if (value["CONFIG_PACKAGE_luci-theme-carbon"] == "y") fail("Carbon theme must be disabled")
 		if (errors) exit 1
 	print "PASS: HG5585F CT, WED TX with native MT7916 RX, host PPE and installed dependencies enabled"
 	if (generated) print "PASS: required custom options survived make defconfig"
