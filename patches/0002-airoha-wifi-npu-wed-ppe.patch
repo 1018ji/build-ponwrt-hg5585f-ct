@@ -3019,7 +3019,7 @@ index 0000000000000000000000000000000000000000..6bf478a7357e75a47f27f85cda43b68c
 + static void airoha_ppe_hw_init(struct airoha_ppe *ppe)
 + {
 + 	u32 sram_ppe_num_data_entries = PPE_SRAM_NUM_ENTRIES, sram_num_entries;
-+@@ -230,6 +242,27 @@ static void airoha_ppe_hw_init(struct airoha_ppe *ppe)
++@@ -230,6 +242,31 @@ static void airoha_ppe_hw_init(struct airoha_ppe *ppe)
 + 			airoha_ppe_set_xmit_frame_size(dev);
 + 		}
 + 	}
@@ -3031,13 +3031,17 @@ index 0000000000000000000000000000000000000000..6bf478a7357e75a47f27f85cda43b68c
 ++{
 ++	struct airoha_ppe *ppe = dev->priv;
 ++	struct airoha_eth *eth = ppe->eth;
-++	int err = 0;
+++	int err = 0, i;
 ++
 ++	mutex_lock(&flow_offload_mutex);
 ++	/* WED uses GDM3; GDM2 is the independent PON MAC. */
 ++	if (enable && eth->ports[AIROHA_GDM3_IDX]) {
-++		err = -EBUSY;
-++		goto out;
+++		for (i = 0; i < ARRAY_SIZE(eth->ports[AIROHA_GDM3_IDX]->devs); i++) {
+++			if (!eth->ports[AIROHA_GDM3_IDX]->devs[i])
+++				continue;
+++			err = -EBUSY;
+++			goto out;
+++		}
 ++	}
 ++	ppe->wed_enabled = enable;
 ++	airoha_ppe_wed_mtu(ppe);
@@ -4144,7 +4148,7 @@ index 0000000000000000000000000000000000000000..6bf478a7357e75a47f27f85cda43b68c
 +index 64909b0..67888e7 100644
 +--- a/drivers/net/ethernet/mediatek/Kconfig
 ++++ b/drivers/net/ethernet/mediatek/Kconfig
-+@@ -8,7 +8,7 @@ config NET_VENDOR_MEDIATEK
++@@ -8,7 +8,8 @@ config NET_VENDOR_MEDIATEK
 + if NET_VENDOR_MEDIATEK
 + 
 + config NET_MEDIATEK_SOC_WED
@@ -4153,6 +4157,7 @@ index 0000000000000000000000000000000000000000..6bf478a7357e75a47f27f85cda43b68c
 + 	def_bool NET_MEDIATEK_SOC != n
 + 
 + config NET_MEDIATEK_SOC
++	+++	depends on ARCH_MEDIATEK || SOC_MT7621 || SOC_MT7620 || COMPILE_TEST
 +diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
 +index be3ecee..bbde777 100644
 +--- a/include/linux/netdevice.h
