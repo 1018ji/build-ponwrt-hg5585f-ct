@@ -50,6 +50,10 @@
     {
       "name": "0012-hg5585f-npu-probe-reset-lifecycle.patch",
       "sha256": "c534796997d2158ec352d57e916c2d0d4e475d4f320c65f72abca145f86ec056"
+    },
+    {
+      "name": "0013-hg5585f-ppe-clear-stale-enable.patch",
+      "sha256": "fb3ca19a76b78c4dd928da8389ee21d198841996b17db4e3bf52526a5f1d350a"
     }
   ],
   "files": {
@@ -177,7 +181,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "a53c737fb14f1acb4d4b98f0ba35b9f56a3791264e51743f278bd55001372dd3",
+      "sha256": "630a79113c15d40dab2af9a3087889b6c90228f980210d7893163e1c51c1b860",
       "executable": false,
       "reviewed": true
     },
@@ -287,11 +291,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "c9325c8c4476e6de10595ba448b5b65089535b0178c89a826ed9ddf718564fbd",
+      "sha256": "c28ceaadbd0d0e8596b883919e5c5fabcb964ed68fd4c85cd73a79101ddeb6ad",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "34a283f56f4e535aee06ccd0cda1ad68d8ba18699ff57c790ac9aa791bd1e148",
+      "sha256": "006bdb9198ce8191a671cb6d9e485db3b5d41aa9cdaf2f5f667a3f3966c0e3db",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -332,6 +336,14 @@
     },
     "target/linux/airoha/patches-6.18/942-clk-en7523-fix-reset-control-state.patch": {
       "sha256": "7322c4a8a04e378c8eda1d89ab33f896b7aaec79061f057a085925f404774547",
+      "executable": false
+    },
+    "scripts/tests/check-hg5585f-ppe-host-start.py": {
+      "sha256": "01110855e3682a7535c46cf67bc4e1ab615828e40953de5fb060189dbe6ee398",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/944-net-airoha-ppe-clear-stale-enable.patch": {
+      "sha256": "a0bd389aa0fe2246d175d0645622f822fdfcd6c4b20fca2e33cfc0b9e2c96434",
       "executable": false
     }
   },

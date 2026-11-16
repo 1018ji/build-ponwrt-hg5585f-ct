@@ -10,3 +10,4 @@
 0010-hg5585f-wed-pcie-intx.patch
 0011-hg5585f-wed-native-rx-irq-map.patch
 0012-hg5585f-npu-probe-reset-lifecycle.patch
+0013-hg5585f-ppe-clear-stale-enable.patch
