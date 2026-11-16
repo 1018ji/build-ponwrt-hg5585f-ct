@@ -9,7 +9,7 @@
     },
     {
       "name": "0002-airoha-wifi-npu-wed-ppe.patch",
-      "sha256": "9eb09c9ea983d04ffc58d91af8afffc85c9c1c348c927f708dc8da72696316aa"
+      "sha256": "6d35e355b123d445e365e77898d3ddbc28b0bb0a59072b65621f7e873e871e33"
     },
     {
       "name": "0003-hg5585f-firmware-and-validation.patch",
@@ -96,7 +96,7 @@
       "executable": false
     },
     "target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch": {
-      "sha256": "8181b134a2ccf3462c0b31ad12670cf691448c9cfd2bd94ddbc7b96f5bdbf1e2",
+      "sha256": "37df4211d5d8d4b2a55a426177781e7bf36cdb3c94938deedfa7d2611a78e94c",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/934-dt-bindings-net-airoha-mt7916-wed.patch": {

@@ -2905,10 +2905,10 @@ index 0000000000000000000000000000000000000000..8f378488a74629ec633ea4a19e0c7069
 + 
 diff --git a/target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch b/target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch
 new file mode 100644
-index 0000000000000000000000000000000000000000..6bf478a7357e75a47f27f85cda43b68cc3fc0872
+index 0000000000000000000000000000000000000000..9e142696207e4b1fe28e7417af28ec95aca9dd0d
 --- /dev/null
 +++ b/target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch
-@@ -0,0 +1,1316 @@
+@@ -0,0 +1,1321 @@
 +From: PonWrt developers <noreply@localhost>
 +Subject: [PATCH] net: airoha: add MT7916 WED TX alongside native receive
 +
@@ -4157,7 +4157,7 @@ index 0000000000000000000000000000000000000000..6bf478a7357e75a47f27f85cda43b68c
 + 	def_bool NET_MEDIATEK_SOC != n
 + 
 + config NET_MEDIATEK_SOC
-+	+++	depends on ARCH_MEDIATEK || SOC_MT7621 || SOC_MT7620 || COMPILE_TEST
+++	depends on ARCH_MEDIATEK || SOC_MT7621 || SOC_MT7620 || COMPILE_TEST
 +diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
 +index be3ecee..bbde777 100644
 +--- a/include/linux/netdevice.h
