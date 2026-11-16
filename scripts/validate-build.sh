@@ -50,15 +50,23 @@ for profile in native wed npu; do
     wed) pattern='*fiberhome_hg5585f-ct-wed-*'; flag=--wed ;;
     npu) pattern='*fiberhome_hg5585f-ct-npu-*'; flag=--npu ;;
   esac
-  count=0
+  recovery_count=0
+  sysupgrade_count=0
   while IFS= read -r image; do
     case "$profile:$image" in native:*-ct-wed-*|native:*-ct-npu-*) continue ;; esac
+    case "$image" in
+      *initramfs-recovery.itb) recovery_count=$((recovery_count + 1)) ;;
+      *sysupgrade.itb) sysupgrade_count=$((sysupgrade_count + 1)) ;;
+      *) echo "Unexpected $profile image name: $image"; exit 1 ;;
+    esac
     if [ -n "$flag" ]; then
       python3 scripts/check-hg5585f-images.py "$flag" "$image"
     else
       python3 scripts/check-hg5585f-images.py "$image"
     fi
-    count=$((count + 1))
   done < <(find bin/targets/airoha/an7581 -maxdepth 1 -name "$pattern.itb" -type f)
-  [ "$count" -ge 2 ] || { echo "Missing recovery/sysupgrade images for $profile"; exit 1; }
+  [ "$recovery_count" -ge 1 ] && [ "$sysupgrade_count" -ge 1 ] || {
+    echo "Missing recovery/sysupgrade image pair for $profile (recovery=$recovery_count sysupgrade=$sysupgrade_count)"
+    exit 1
+  }
 done

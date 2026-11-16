@@ -19,6 +19,10 @@ def source_validation():
     return text.split('\nfor profile in native wed npu;', 1)[0]
 
 
+def full_validation():
+    return (RECIPE/'scripts/validate-build.sh').read_text()
+
+
 def workflow_step(name):
     text = WORKFLOW.read_text()
     start = text.index('      - name: ' + name + '\n')
@@ -94,9 +98,10 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
     log.write(json.dumps(sys.argv) + '\\n')
 '''
         for name in ('check-hg5585f-ppe-accounting.py', 'check-hg5585f-rom-abi.py',
-                     'check-hg5585f-wifi-diagnostics.py'):
+                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-images.py'):
             self.write(Path('scripts')/name, stub)
         self.write(Path('recipe/scripts/prepare.py'), stub)
+        self.write(Path('scripts/validate-build.sh'), full_validation())
 
     def write(self, path, contents=''):
         target = self.root/path
@@ -114,10 +119,44 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         return subprocess.run(['bash', '-euo', 'pipefail', '-c', source_validation()],
                               cwd=self.root, env=env, text=True, capture_output=True)
 
+    def validate_full(self):
+        env = dict(os.environ, GITHUB_WORKSPACE=str(self.root/'recipe'),
+                   CHECK_LOG=str(self.calls))
+        return subprocess.run(['bash', 'scripts/validate-build.sh'], cwd=self.root,
+                              env=env, text=True, capture_output=True)
+
+    def image_set(self, recovery=True, sysupgrade=True):
+        output = self.root/'bin/targets/airoha/an7581'
+        output.mkdir(parents=True, exist_ok=True)
+        for profile in ('ct', 'ct-wed', 'ct-npu'):
+            if recovery:
+                (output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-initramfs-recovery.itb').touch()
+            if sysupgrade:
+                (output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-squashfs-sysupgrade.itb').touch()
+
     def checked_backends(self):
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
         return [args[args.index('--backend') + 1] for args in calls
                 if '--backend' in args]
+
+    def test_full_validation_requires_recovery_and_sysupgrade_per_profile(self):
+        self.tree(self.mt76)
+        self.image_set(recovery=True, sysupgrade=False)
+        result = self.validate_full()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Missing recovery/sysupgrade image pair for native', result.stdout)
+
+    def test_full_validation_runs_all_profiles_after_image_pairs_exist(self):
+        self.tree(self.mt76)
+        self.image_set()
+        result = self.validate_full()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        image_calls = [args for args in calls if 'check-hg5585f-images.py' in args[0]]
+        self.assertEqual(len(image_calls), 6)
+        self.assertEqual(sum('--wed' in args for args in image_calls), 2)
+        self.assertEqual(sum('--npu' in args for args in image_calls), 2)
+        self.assertEqual(sum('--wed' not in args and '--npu' not in args for args in image_calls), 2)
 
     def test_mt76_kernel_package_layout(self):
         self.tree(self.mt76)
