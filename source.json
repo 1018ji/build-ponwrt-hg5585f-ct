@@ -26,6 +26,10 @@
     {
       "name": "0006-hg5585f-wifi-review-and-diagnostics.patch",
       "sha256": "ea6c008527c75287d2777de7bdea5751178ee1f518dd88fdd6205e1e2130c59f"
+    },
+    {
+      "name": "0007-hg5585f-wed-port-and-probe-cleanup.patch",
+      "sha256": "a68cdf1963676f710801039a51579f2464fafdad31d6807db64e6072ed3f151e"
     }
   ],
   "files": {
@@ -153,7 +157,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "afa2518735e60f3562c17d54584b92205b4a2cc76899b890de82425e60a08d0f",
+      "sha256": "f0e743afbf13e8390223b9037988bd1012b457f84a03f6255433517577c69c22",
       "executable": false,
       "reviewed": true
     },
@@ -253,6 +257,22 @@
       "sha256": "14e8d5f09b07f5d3476693b0ef9f5ad92df1d2bd32ecad0e0db3a7d750c6ba2b",
       "executable": false,
       "reviewed": true
+    },
+    "target/linux/airoha/patches-6.18/939-net-airoha-fix-wed-gdm-port-and-probe-cleanup.patch": {
+      "sha256": "78ce92f6f060a320e3ad0f6de355dadb416d6a62f5b729877d2a46bb899d739a",
+      "executable": false
+    },
+    "scripts/tests/test-wed-probe.py": {
+      "sha256": "96015e7acf95c361fb7a9d1ce318239197fd8d1df5213fc303aaa32f00c35ceb",
+      "executable": false
+    },
+    "scripts/tests/test-workflow-paths.py": {
+      "sha256": "a448994c11fc21f4208d2cd11128976d60b7bf7b5223584c2b19adaa32602c39",
+      "executable": false
+    },
+    "scripts/validate-build.sh": {
+      "sha256": "36e608d7f822a3988a1202bd3b8c40edd70a82f0d0e00b38447ec81a73d588d9",
+      "executable": false
     }
   },
   "feeds": {

@@ -25,6 +25,7 @@ for kernel_config in "${kernel_configs[@]}"; do
   kernel=${kernel_config%/.config}
   echo "Checking built kernel source: $kernel"
   python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
+  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
   python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
   mt76_found=0
   for mt76 in "${kernel%/*}"/mt76-*; do
