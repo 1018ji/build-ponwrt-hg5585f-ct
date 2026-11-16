@@ -9,3 +9,4 @@
 0009-hg5585f-wed-extended-irq-masking.patch
 0010-hg5585f-wed-pcie-intx.patch
 0011-hg5585f-wed-native-rx-irq-map.patch
+0012-hg5585f-npu-probe-reset-lifecycle.patch

@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Exercise reset polarity/errors, deferred firmware and reset-held GDMA teardown."""
+import argparse
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+
+def function(text, name):
+    match = re.search(r'^static int\s+' + name + r'\([^;]*?\)\n\{', text, re.M)
+    assert match, name
+    brace = text.index('{', match.start())
+    end, depth = brace + 1, 1
+    while depth:
+        depth += (text[end] == '{') - (text[end] == '}')
+        end += 1
+    return text[match.start():end]
+
+
+def run_c(cc, code):
+    with tempfile.TemporaryDirectory(prefix='hg5585f-npu-lifecycle-') as temporary:
+        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+        source.write_text(code)
+        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wformat=2',
+                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+        subprocess.run([str(binary)], check=True)
+
+
+def reset_test(text, cc):
+    prefix = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <errno.h>
+typedef uint32_t u32;
+#define BIT(n) (1U << (n))
+#define RST_NR_PER_BANK 32
+#define REG_NP_SCU_PCIC 0x88
+#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+struct reset_controller_dev { int unused; };
+struct regmap { u32 regs[64]; int read_error,write_error; };
+struct en_rst_data { struct reset_controller_dev rcdev; u32 bank_ofs[3]; struct regmap *map; };
+static int regmap_update_bits(struct regmap *map,u32 offset,u32 mask,u32 value)
+{ if(map->write_error)return map->write_error;map->regs[offset/4]=(map->regs[offset/4]&~mask)|(value&mask);return 0; }
+static int regmap_read(struct regmap *map,u32 offset,u32 *value)
+{ if(map->read_error)return map->read_error;*value=map->regs[offset/4];return 0; }
+'''
+    tests = r'''
+int main(void)
+{
+    struct regmap map={0};
+    struct en_rst_data reset={.bank_ofs={0,4,REG_NP_SCU_PCIC},.map=&map};
+    const unsigned long ids[]={9,32+14,64+3};
+    for(unsigned int i=0;i<sizeof(ids)/sizeof(ids[0]);i++) {
+        unsigned long id=ids[i];u32 offset=reset.bank_ofs[id/32],bit=BIT(id%32);
+        u32 neighbours=0xa5a5a5a5&~bit;
+        map.regs[offset/4]=neighbours|(offset==REG_NP_SCU_PCIC?bit:0);
+        assert(en7523_reset_status(&reset.rcdev,id)==0);
+        assert(!en7523_reset_update(&reset.rcdev,id,true));
+        assert(en7523_reset_status(&reset.rcdev,id)==1);
+        assert((map.regs[offset/4]&~bit)==neighbours);
+        assert(!en7523_reset_update(&reset.rcdev,id,false));
+        assert(en7523_reset_status(&reset.rcdev,id)==0);
+        assert((map.regs[offset/4]&~bit)==neighbours);
+    }
+    map.write_error=-EIO;
+    assert(en7523_reset_update(&reset.rcdev,9,true)==-EIO);
+    map.read_error=-EIO;
+    assert(en7523_reset_status(&reset.rcdev,9)==-EIO);
+    puts("PASS: NPU/GDMA and inverted PCIC resets preserve neighbours, deassert deterministically and propagate regmap errors");
+}
+'''
+    run_c(cc, prefix + function(text, 'en7523_reset_update') + '\n' +
+          function(text, 'en7523_reset_status') + tests)
+
+
+def lifecycle_test(text, cc):
+    prefix = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+typedef uint32_t u32;
+#define BIT(n) (1U<<(n))
+#define ARRAY_SIZE(a) ((int)(sizeof(a)/sizeof((a)[0])))
+#define EPROBE_DEFER 517
+#define WRITE_ONCE(a,b) ((a)=(b))
+#define lockdep_assert_held(p) assert(*(p))
+#define NPU_NUM_CORES 8
+#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
+#define REG_CR_MBOX_INT_STATUS 0
+#define MBOX_INT_STATUS_MASK BIT(8)
+#define REG_IRQ_RXDONE(n) (4+(n)*4)
+#define NPU_IRQ_RX_MASK(n) BIT(16+(n))
+#define REG_WDT_TIMER_CTRL(n) (16+(n)*4)
+#define WDT_INTR_MASK BIT(21)
+#define LEGACY_GDMA_CTRL0(n) (8+((n)<<4))
+#define LEGACY_RX_COPY_CHANNEL 3
+#define LEGACY_GDMA_BUSY BIT(1)
+#define NPU_EN7581_FIRMWARE_RV32_MAX_SIZE 0x200000
+#define NPU_EN7581_FIRMWARE_DATA_MAX_SIZE 0x10000
+#define airoha_wlan_dbg(dev,...) do { (void)(dev); } while(0)
+enum airoha_npu_legacy_state { LEGACY_STOPPED,LEGACY_RUNNING,LEGACY_FAULT };
+struct reset_control { int state,write_error,read_error; bool stuck; };
+struct device { void *of_node; };
+struct firmware { size_t size; };
+struct airoha_npu_legacy {
+    int lock,state,mbox_irq,work_count,wdt_irq[8];bool blocked;
+    struct reset_control *npu_reset,*gdma_reset;char *gdma;
+};
+struct airoha_npu_core { int lock,wdt_work; };
+struct airoha_npu { struct airoha_npu_legacy *legacy;struct airoha_npu_core cores[8];
+                    struct device *dev;int irqs[2];void *regmap;int wlan_abi; };
+static struct reset_control resets[2];
+static int npu_mmio,gdma_reads,reset_writes,drain_error,syncs,cancels,requests,releases;
+static int fw_error_at,fw_error,fw_names_count;
+static size_t fw_sizes[2];
+static void spin_lock_bh(int *lock) { (*lock)++; }
+static void spin_unlock_bh(int *lock) { assert(*lock);(*lock)--; }
+static int reset_control_status(struct reset_control *reset)
+{ return reset->read_error?reset->read_error:reset->state; }
+static int reset_control_assert(struct reset_control *reset)
+{ reset_writes++;if(reset->write_error)return reset->write_error;if(!reset->stuck)reset->state=1;return 0; }
+static int reset_control_deassert(struct reset_control *reset)
+{ reset_writes++;if(reset->write_error)return reset->write_error;if(!reset->stuck)reset->state=0;return 0; }
+#define read_poll_timeout(op,val,cond,delay,timeout,first,arg) ({ \
+    int result=-ETIMEDOUT;for(int poll=0;poll<32;poll++){val=op(arg);if(cond){result=0;break;}}result; })
+static void regmap_write(void *map,u32 offset,u32 value)
+{ (void)map;(void)offset;(void)value;assert(resets[0].state==0);npu_mmio++; }
+#define regmap_clear_bits regmap_write
+#define regmap_set_bits regmap_write
+static int gdma_poll(u32 *value)
+{ assert(resets[1].state==0);assert(resets[0].state==1);gdma_reads++;*value=0;return drain_error; }
+#define readl_poll_timeout(addr,value,cond,delay,timeout) ((void)(addr),gdma_poll(&(value)))
+static void synchronize_irq(int irq) { assert(irq>=0);syncs++; }
+static void cancel_work_sync(int *work) { (void)work;cancels++; }
+static int of_property_read_string_array(void *node,const char *property,const char **names,int count)
+{ (void)node;(void)property;assert(count==2);names[0]="rv32";names[1]="data";return fw_names_count; }
+static int request_firmware_direct(const struct firmware **fw,const char *name,struct device *dev)
+{
+    static struct firmware result;
+    (void)name;(void)dev;assert(!reset_writes&&!npu_mmio&&!gdma_reads);
+    requests++;if(requests==fw_error_at)return fw_error;
+    result.size=fw_sizes[requests-1];*fw=&result;return 0;
+}
+static void release_firmware(const struct firmware *fw) { assert(fw);releases++; }
+static int dev_err_probe(struct device *dev,int error,const char *format,...)
+{ (void)dev;(void)format;return error; }
+static void setup(struct airoha_npu *npu,struct airoha_npu_legacy *legacy,int npu_state,int dma_state)
+{
+    static struct device device;static char gdma[0x2b0];
+    memset(npu,0,sizeof(*npu));memset(legacy,0,sizeof(*legacy));memset(resets,0,sizeof(resets));
+    resets[0].state=npu_state;resets[1].state=dma_state;
+    legacy->lock=1;legacy->state=LEGACY_RUNNING;legacy->npu_reset=&resets[0];legacy->gdma_reset=&resets[1];
+    legacy->gdma=gdma;legacy->mbox_irq=-1;
+    for(int i=0;i<8;i++)legacy->wdt_irq[i]=-1;
+    npu->legacy=legacy;npu->dev=&device;npu->wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024;
+    npu_mmio=gdma_reads=reset_writes=drain_error=syncs=cancels=requests=releases=0;
+    fw_error_at=0;fw_error=-ENOENT;fw_names_count=2;fw_sizes[0]=4096;fw_sizes[1]=8192;
+}
+'''
+    tests = r'''
+int main(void)
+{
+    struct airoha_npu npu;struct airoha_npu_legacy legacy;
+    /* Reproduce probe retry with either/both blocks already in reset. */
+    for(int n=0;n<2;n++)for(int d=0;d<2;d++) {
+        setup(&npu,&legacy,n,d);
+        assert(!airoha_npu_legacy_stop(&npu));
+        assert(legacy.state==LEGACY_STOPPED&&legacy.blocked);
+        assert(resets[0].state==1&&resets[1].state==1);
+        assert(gdma_reads==!d&&npu_mmio==(!n?11:0));
+        int reads=gdma_reads,writes=reset_writes;
+        assert(!airoha_npu_legacy_stop(&npu)&&gdma_reads==reads&&reset_writes==writes);
+    }
+    setup(&npu,&legacy,0,0);drain_error=-ETIMEDOUT;
+    assert(airoha_npu_legacy_stop(&npu)==-ETIMEDOUT&&legacy.state==LEGACY_FAULT&&legacy.blocked&&resets[1].state==1);
+    setup(&npu,&legacy,0,0);resets[1].read_error=-EIO;
+    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads);
+    setup(&npu,&legacy,1,1);resets[0].read_error=-EIO;
+    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads&&!npu_mmio);
+    setup(&npu,&legacy,0,0);resets[0].write_error=-EIO;
+    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads&&resets[1].state==1);
+    setup(&npu,&legacy,0,0);resets[1].write_error=-EIO;
+    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&legacy.blocked);
+    setup(&npu,&legacy,1,1);
+    assert(!airoha_npu_deassert_reset(&resets[1])&&resets[1].state==0);
+    resets[1].state=1;resets[1].stuck=true;
+    assert(airoha_npu_deassert_reset(&resets[1])==-ETIMEDOUT);
+    resets[1].stuck=false;resets[1].read_error=-EIO;
+    assert(airoha_npu_deassert_reset(&resets[1])==-EIO);
+    resets[1].write_error=-EINVAL;
+    assert(airoha_npu_deassert_reset(&resets[1])==-EINVAL);
+    puts("PASS: deferred/repeated stop never reads reset-held NPU/GDMA; timeouts/errors retain fault and block state; deassert is verified");
+
+    setup(&npu,&legacy,1,1);fw_error_at=1;
+    assert(airoha_npu_legacy_firmware_ready(&npu)==-EPROBE_DEFER&&requests==1&&!releases&&!reset_writes);
+    setup(&npu,&legacy,1,1);fw_error_at=2;
+    assert(airoha_npu_legacy_firmware_ready(&npu)==-EPROBE_DEFER&&requests==2&&releases==1&&!reset_writes);
+    setup(&npu,&legacy,1,1);fw_error_at=1;fw_error=-EIO;
+    assert(airoha_npu_legacy_firmware_ready(&npu)==-EIO&&!reset_writes);
+    setup(&npu,&legacy,1,1);fw_sizes[0]=0x200001;
+    assert(airoha_npu_legacy_firmware_ready(&npu)==-E2BIG&&releases==1);
+    setup(&npu,&legacy,1,1);fw_sizes[1]=0;
+    assert(airoha_npu_legacy_firmware_ready(&npu)==-EINVAL&&releases==2);
+    setup(&npu,&legacy,1,1);
+    assert(!airoha_npu_legacy_firmware_ready(&npu)&&requests==2&&releases==2&&!reset_writes);
+    setup(&npu,&legacy,1,1);npu.wlan_abi=0;
+    assert(!airoha_npu_legacy_firmware_ready(&npu)&&!requests);
+    puts("PASS: legacy firmware is checked before hardware ownership; missing pairs defer with no reset/DMA/MMIO side effects");
+}
+'''
+    names = ('airoha_npu_assert_reset', 'airoha_npu_deassert_reset',
+             'airoha_npu_legacy_stop', 'airoha_npu_legacy_firmware_ready')
+    run_c(cc, prefix + '\n'.join(function(text, name) for name in names) + tests)
+    probe = function(text, 'airoha_npu_probe')
+    assert probe.index('airoha_npu_legacy_firmware_ready') < probe.index('airoha_npu_legacy_init')
+    boot = function(text, 'airoha_npu_boot')
+    assert boot.index('airoha_npu_deassert_reset(legacy->gdma_reset)') < boot.index('writel(0, legacy->gdma')
+    assert boot.index('airoha_npu_deassert_reset(legacy->npu_reset)') < boot.index('REG_RX_BASE')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--kernel', type=Path, required=True)
+    parser.add_argument('--cc', default='cc')
+    args = parser.parse_args()
+    reset_test((args.kernel/'drivers/clk/clk-en7523.c').read_text(), args.cc)
+    lifecycle_test((args.kernel/'drivers/net/ethernet/airoha/airoha_npu.c').read_text(), args.cc)
+
+
+if __name__ == '__main__':
+    main()
