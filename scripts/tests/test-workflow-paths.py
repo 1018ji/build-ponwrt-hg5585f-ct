@@ -28,7 +28,7 @@ class WorkflowPaths(unittest.TestCase):
         self.root = Path(temporary.name)
         self.kernel = Path('build_dir/target-aarch64_cortex-a53_musl/'
                            'linux-airoha_an7581/linux-6.18.60')
-        self.mt76 = self.kernel.parent/'mt76-2026-10-28-0936617d'
+        self.mt76 = self.kernel.parent/'mt76-2026.10.28~0936617d'
         self.calls = self.root/'calls.jsonl'
         self.write(self.kernel/'.config', 'CONFIG_NET_AIROHA_WED=y\n')
         # Stub checker internals; the real workflow selects and passes paths.
@@ -80,6 +80,35 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.checked_backends(), [str(other/'npu_rx_legacy.c')])
 
+    def test_initramfs_manifest_and_other_files_are_not_kernels(self):
+        self.tree(self.mt76)
+        # Kernel/SetInitramfs writes this beside LINUX_DIR, not inside it.
+        self.write(Path(str(self.kernel) + '.init-cpio-list'), 'file /init init 0755 0 0\n')
+        self.write(Path(str(self.kernel) + '.tar.xz'))
+        self.write(Path(str(self.kernel) + '.debug'))
+        self.write(self.kernel.parent/'linux-firmware-20261019/Makefile')
+        result = self.validate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+        self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
+
+    def test_unrelated_config_is_not_a_kernel(self):
+        self.tree(self.mt76)
+        self.write(self.kernel.parent/'linux-firmware-20261019/.config')
+        result = self.validate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+
+    def test_multiple_configured_kernels_fail_before_any_source_check(self):
+        other = self.kernel.parent/'linux-6.18.61/.config'
+        self.write(other)
+        result = self.validate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Expected one configured AN7581 kernel; found 2', result.stdout)
+        self.assertIn(str(self.kernel/'.config'), result.stdout)
+        self.assertIn(str(other), result.stdout)
+        self.assertFalse(self.calls.exists())
+
     def test_missing_backend_fails_with_actual_path(self):
         self.tree(self.mt76, backend=False)
         result = self.validate()
@@ -101,7 +130,17 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         (self.root/self.kernel/'.config').unlink()
         result = self.validate()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Kernel config missing', result.stdout)
+        self.assertIn('Expected one configured AN7581 kernel; found 0', result.stdout)
+        self.assertFalse(self.calls.exists())
+
+    def test_absent_build_tree_cannot_skip_checks(self):
+        (self.root/self.kernel/'.config').unlink()
+        (self.root/self.kernel).rmdir()
+        (self.root/self.kernel.parent).rmdir()
+        result = self.validate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Expected one configured AN7581 kernel; found 0', result.stdout)
+        self.assertFalse(self.calls.exists())
 
 
 if __name__ == '__main__':

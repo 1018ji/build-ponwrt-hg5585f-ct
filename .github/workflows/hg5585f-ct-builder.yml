@@ -230,8 +230,19 @@ jobs:
         working-directory: openwrt
         run: |
           export PATH="$PWD/staging_dir/host/bin:$PATH"
-          for kernel in build_dir/target-*/linux-airoha_an7581/linux-*; do
-            [ -f "$kernel/.config" ] || { echo 'Kernel config missing'; exit 1; }
+          shopt -s nullglob
+          kernel_configs=(build_dir/target-*/linux-airoha_an7581/linux-[0-9]*/.config)
+          [ "${#kernel_configs[@]}" -eq 1 ] || {
+            echo "Expected one configured AN7581 kernel; found ${#kernel_configs[@]}"
+            if [ "${#kernel_configs[@]}" -gt 0 ]; then
+              printf 'Kernel candidate: %s\n' "${kernel_configs[@]}"
+            fi
+            exit 1
+          }
+          for kernel_config in "${kernel_configs[@]}"; do
+            [ -f "$kernel_config" ] || { echo "Kernel config missing: $kernel_config"; exit 1; }
+            kernel=${kernel_config%/.config}
+            echo "Checking built kernel source: $kernel"
             python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
             python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
             mt76_found=0
