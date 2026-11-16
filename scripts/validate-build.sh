@@ -4,11 +4,19 @@ set -euo pipefail
 
 export PATH="$PWD/staging_dir/host/bin:$PATH"
 shopt -s nullglob
-kernel_configs=(build_dir/target-*/linux-airoha_an7581/linux-[0-9]*/.config)
+kernel_configs=()
+while IFS= read -r -d '' kernel_config; do
+  kernel_dir=${kernel_config%/.config}
+  kernel_name=${kernel_dir##*/}
+  [[ "$kernel_name" =~ ^linux-[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || continue
+  kernel_configs+=("$kernel_config")
+done < <(find -L build_dir/target-* -type f -path '*/linux-airoha_an7581/linux-*/.config' -print0 2>/dev/null)
 [ "${#kernel_configs[@]}" -eq 1 ] || {
   echo "Expected one configured AN7581 kernel; found ${#kernel_configs[@]}"
   if [ "${#kernel_configs[@]}" -gt 0 ]; then
     printf 'Kernel candidate: %s\n' "${kernel_configs[@]}"
+  else
+    find -L build_dir/target-* -type f -path '*/linux-airoha_an7581/linux-*/.config' -print 2>/dev/null || true
   fi
   exit 1
 }

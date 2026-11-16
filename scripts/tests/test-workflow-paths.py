@@ -148,6 +148,14 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
         self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
 
+    def test_initramfs_directory_with_config_is_not_a_kernel(self):
+        self.tree(self.mt76)
+        self.write(self.kernel.parent/'linux-6.18.60.init-cpio-list/.config')
+        result = self.validate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+        self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
+
     def test_unrelated_config_is_not_a_kernel(self):
         self.tree(self.mt76)
         self.write(self.kernel.parent/'linux-firmware-20261019/.config')
