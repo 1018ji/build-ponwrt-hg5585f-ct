@@ -1,19 +1,68 @@
 #!/bin/bash
 set -euo pipefail
 umask 022
+
+total_start=$(date +%s)
+total_reported=0
+log_file=
+
+format_duration() {
+  local seconds=${1:-0}
+  printf '%02d:%02d:%02d' $((seconds / 3600)) $(((seconds / 60) % 60)) $((seconds % 60))
+}
+
+log() {
+  local line
+  line=$(printf '[%s] %s' "$(date '+%F %T')" "$*")
+  printf '%s\n' "$line"
+  if [ -n "$log_file" ]; then
+    printf '%s\n' "$line" >> "$log_file"
+  fi
+}
+
+report_total() {
+  local rc=$?
+  if [ "$total_reported" -eq 0 ]; then
+    total_reported=1
+    if [ "$rc" -eq 0 ]; then
+      log "TOTAL completed in $(format_duration $(( $(date +%s) - total_start )))"
+    else
+      log "TOTAL failed with exit code $rc after $(format_duration $(( $(date +%s) - total_start )))"
+    fi
+  fi
+  return "$rc"
+}
+trap report_total EXIT
+
+step() {
+  local name=$1
+  shift
+  local started=$(date +%s)
+  log "START $name"
+  if "$@"; then
+    log "DONE  $name ($(format_duration $(( $(date +%s) - started ))))"
+  else
+    local rc=$?
+    log "FAIL  $name (exit=$rc, $(format_duration $(( $(date +%s) - started ))))"
+    return "$rc"
+  fi
+}
+
 mode=${1:-build}
 case "$mode" in
-  shell) cd /workdir; exec bash ;;
+  shell) log 'Opening interactive build shell'; cd /workdir; exec bash ;;
   check)
-    test "$(id -u)" -ne 0
-    for command in gcc g++ make git python3 ccache rsync fdtget dumpimage; do
-      command -v "$command"
-    done
-    testfile=$(mktemp /workdir/hg5585f-fs.XXXXXX)
-    trap 'rm -f "$testfile"' EXIT
-    test ! -e "${testfile/hg5585f-fs/HG5585F-FS}"
-    gcc --version | head -1
-    printf 'PASS: Ubuntu 22.04 builder, non-root user, case-sensitive volume (%s)\n' "$(uname -m)"
+    step 'Check Docker build dependencies' bash -euo pipefail -c '
+      test "$(id -u)" -ne 0
+      for command in gcc g++ make git python3 ccache rsync fdtget dumpimage; do command -v "$command"; done
+      gcc --version | head -1
+    '
+    step 'Check case-sensitive Linux work volume' bash -euo pipefail -c '
+      testfile=$(mktemp /workdir/hg5585f-fs.XXXXXX)
+      test ! -e "${testfile/hg5585f-fs/HG5585F-FS}"
+      rm -f "$testfile"
+    '
+    log "PASS Ubuntu 22.04 builder, non-root user, case-sensitive volume ($(uname -m))"
     exit 0 ;;
   build) ;;
   *) echo 'Usage: build.sh [build|shell|check]' >&2; exit 2 ;;
@@ -26,44 +75,48 @@ build_root=/workdir/trees/$bundle
 recipe=$build_root/recipe
 source=$build_root/openwrt
 output=/output/$bundle
+export build_root recipe source output
 mkdir -p "$recipe" "$output" /workdir/dl /workdir/ccache
-# Snapshot the recipe into the Linux filesystem; host files remain read-only.
-rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
+: > "$output/steps.log"
+log_file=$output/steps.log
+log "INFO  Build bundle=$bundle jobs=$jobs source=$source"
+step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 export CCACHE_DIR=/workdir/ccache CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
 export GITHUB_WORKSPACE="$recipe"
-python3 "$recipe/scripts/tests/test-workflow-paths.py"
+step 'Run workflow path tests' python3 "$recipe/scripts/tests/test-workflow-paths.py"
 if [ ! -d "$source" ]; then
-  # A failed clone is kept out of the reusable source directory.
-  download_source=$(mktemp -d "$build_root/source.XXXXXX")
-  rmdir "$download_source"
-  trap 'rm -rf "${download_source:-}"' EXIT
-  python3 "$recipe/scripts/prepare.py" clone "$download_source"
-  mv "$download_source" "$source"
-  trap - EXIT
+  step 'Clone pinned OpenWrt source' bash -o pipefail -c '
+    download_source=$(mktemp -d "$build_root/source.XXXXXX")
+    rmdir "$download_source"
+    trap '\''rm -rf "${download_source:-}"'\'' EXIT
+    python3 "$recipe/scripts/prepare.py" clone "$download_source"
+    mv "$download_source" "$source"
+    trap - EXIT
+  '
 else
-  python3 "$recipe/scripts/prepare.py" apply "$source"
+  step 'Apply and verify pinned source patches' python3 "$recipe/scripts/prepare.py" apply "$source"
 fi
 cd "$source"
-if [ ! -e dl ]; then ln -s /workdir/dl dl; fi
-python3 scripts/check-hg5585f-offload.py
+step 'Check exported HG5585F patch bundle' python3 scripts/check-hg5585f-offload.py
+if [ ! -e dl ]; then step 'Link persistent package download cache' ln -s /workdir/dl dl; fi
 if [ ! -f .config ]; then
-  cp configs/hg5585f-ct.config .config
-  printf '\nCONFIG_DEVEL=y\nCONFIG_CCACHE=y\nCONFIG_CCACHE_DIR="%s"\n' "$CCACHE_DIR" >> .config
+  step 'Create initial HG5585F build configuration' bash -o pipefail -c '
+    cp configs/hg5585f-ct.config .config
+    printf "\\nCONFIG_DEVEL=y\\nCONFIG_CCACHE=y\\nCONFIG_CCACHE_DIR=\\\"%s\\\"\\n" "$CCACHE_DIR" >> .config
+  '
+else
+  log 'INFO  Reusing existing OpenWrt configuration'
 fi
-./scripts/feeds update -a
-./scripts/feeds install luci luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug \
-  airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa \
-  iperf3 pciutils htop zoneinfo-asia
-make defconfig
-python3 "$recipe/scripts/prepare.py" config .config
-make download -j"$jobs" 2>&1 | tee "$output/download.log"
-printf 'Building %s with make -j%s; incremental state: %s\n' "$bundle" "$jobs" "$source"
-if ! make -j"$jobs" 2>&1 | tee "$output/build.log"; then
-  make -j1 V=s 2>&1 | tee -a "$output/build.log"
+step 'Update pinned package feeds' bash -o pipefail -c './scripts/feeds update -a'
+step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia'
+step 'Resolve final OpenWrt configuration' make defconfig
+step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
+step 'Download package sources' bash -o pipefail -c "make download -j\"$jobs\" 2>&1 | tee \"$output/download.log\""
+log "INFO  Firmware build uses make -j$jobs"
+if ! step 'Compile native, WED and NPU firmware' bash -o pipefail -c "make -j\"$jobs\" 2>&1 | tee \"$output/build.log\""; then
+  step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s 2>&1 | tee -a \"$output/build.log\""
 fi
-# Preserve firmware before post-build validation, as in Actions.
-cp -a bin/targets/airoha/an7581/. "$output/"
-cp "$recipe/source.json" "$output/source.json"
-bash "$recipe/scripts/validate-build.sh" 2>&1 | tee "$output/validation.log"
-ccache -s | tee "$output/ccache.log"
-printf 'Firmware and logs: %s\n' "$output"
+step 'Copy firmware and build metadata to output' bash -o pipefail -c "cp -a bin/targets/airoha/an7581/. \"$output/\"; cp \"$recipe/source.json\" \"$output/source.json\""
+step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
+step 'Print compiler cache statistics' bash -o pipefail -c "ccache -s | tee \"$output/ccache.log\""
+log "OUTPUT firmware and logs: $output"

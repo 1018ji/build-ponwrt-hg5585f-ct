@@ -1,5 +1,35 @@
 #!/bin/bash
 set -euo pipefail
+
+total_start=$(date +%s)
+format_duration() {
+  local seconds=${1:-0}
+  printf '%02d:%02d:%02d' $((seconds / 3600)) $(((seconds / 60) % 60)) $((seconds % 60))
+}
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+report_total() {
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log "TOTAL completed in $(format_duration $(( $(date +%s) - total_start )))"
+  else
+    log "TOTAL failed with exit code $rc after $(format_duration $(( $(date +%s) - total_start )))"
+  fi
+  return "$rc"
+}
+trap report_total EXIT
+step() {
+  local name=$1
+  shift
+  local started=$(date +%s)
+  log "START $name"
+  if "$@"; then
+    log "DONE  $name ($(format_duration $(( $(date +%s) - started ))))"
+  else
+    local rc=$?
+    log "FAIL  $name (exit=$rc, $(format_duration $(( $(date +%s) - started ))))"
+    return "$rc"
+  fi
+}
 if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then
   cat <<'HELP'
 Usage: bash scripts/build-docker.sh [build|shell|check]
@@ -34,11 +64,11 @@ fi
   exit 2
 }
 printf 'Docker build: make -j%s\n' "$default_jobs"
-docker build -t "$image" "$recipe/docker"
+step 'Build Ubuntu 22.04 Docker image' docker build -t "$image" "$recipe/docker"
 options=(--rm --init --name hg5585f-local-build
   --mount "type=bind,source=$recipe,target=/recipe,readonly"
   --mount "type=bind,source=$output,target=/output"
   --mount "type=volume,source=$volume,target=/workdir"
   --env "HG5585F_JOBS=$default_jobs")
 if [ -t 0 ] && [ -t 1 ]; then options+=(-it); fi
-docker run "${options[@]}" "$image" "$mode"
+step "Run Docker compiler ($mode)" docker run "${options[@]}" "$image" "$mode"
