@@ -2905,10 +2905,10 @@ index 0000000000000000000000000000000000000000..8f378488a74629ec633ea4a19e0c7069
 + 
 diff --git a/target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch b/target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch
 new file mode 100644
-index 0000000000000000000000000000000000000000..9e142696207e4b1fe28e7417af28ec95aca9dd0d
+index 0000000000000000000000000000000000000000..4866afe15a563d5ae6a2fa1869164955d60f265e
 --- /dev/null
 +++ b/target/linux/airoha/patches-6.18/933-net-airoha-add-mt7916-wed-tx.patch
-@@ -0,0 +1,1321 @@
+@@ -0,0 +1,1325 @@
 +From: PonWrt developers <noreply@localhost>
 +Subject: [PATCH] net: airoha: add MT7916 WED TX alongside native receive
 +
@@ -4148,7 +4148,7 @@ index 0000000000000000000000000000000000000000..9e142696207e4b1fe28e7417af28ec95
 +index 64909b0..67888e7 100644
 +--- a/drivers/net/ethernet/mediatek/Kconfig
 ++++ b/drivers/net/ethernet/mediatek/Kconfig
-+@@ -8,7 +8,8 @@ config NET_VENDOR_MEDIATEK
++@@ -8,11 +8,12 @@
 + if NET_VENDOR_MEDIATEK
 + 
 + config NET_MEDIATEK_SOC_WED
@@ -4157,7 +4157,11 @@ index 0000000000000000000000000000000000000000..9e142696207e4b1fe28e7417af28ec95
 + 	def_bool NET_MEDIATEK_SOC != n
 + 
 + config NET_MEDIATEK_SOC
++ 	tristate "MediaTek SoC Gigabit Ethernet support"
 ++	depends on ARCH_MEDIATEK || SOC_MT7621 || SOC_MT7620 || COMPILE_TEST
++ 	depends on NET_DSA || !NET_DSA
++ 	select PINCTRL
++ 	select PHYLINK
 +diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
 +index be3ecee..bbde777 100644
 +--- a/include/linux/netdevice.h
