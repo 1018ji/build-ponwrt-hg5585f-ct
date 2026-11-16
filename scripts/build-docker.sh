@@ -30,14 +30,22 @@ step() {
     return "$rc"
   fi
 }
+reuse=${HG5585F_REUSE_TREE:-0}
+args=()
+for argument in "$@"; do
+  if [ "$argument" = --reuse ]; then reuse=1; else args+=("$argument"); fi
+done
+set -- ${args[@]+"${args[@]}"}
 if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then
   cat <<'HELP'
-Usage: bash scripts/build-docker.sh [build|shell|check]
+Usage: bash scripts/build-docker.sh [--reuse] [build|shell|check]
 
 Build HG5585F firmware in Ubuntu 22.04 using a persistent Docker volume.
 HG5585F_OUTPUT_DIR defaults to /Users/happyelements/Desktop/刷机/编译.
 HG5585F_JOBS defaults to the host logical CPU count and is passed to make -j.
 Reuse the same command for incremental builds.
+Pass --reuse (or HG5585F_REUSE_TREE=1) to reuse a compatible source tree at its original
+path after appending patches. Existing source changes are verified before updating.
 HELP
   exit 0
 fi
@@ -69,6 +77,6 @@ options=(--rm --init --name hg5585f-local-build
   --mount "type=bind,source=$recipe,target=/recipe,readonly"
   --mount "type=bind,source=$output,target=/output"
   --mount "type=volume,source=$volume,target=/workdir"
-  --env "HG5585F_JOBS=$default_jobs")
+  --env "HG5585F_JOBS=$default_jobs" --env "HG5585F_REUSE_TREE=$reuse")
 if [ -t 0 ] && [ -t 1 ]; then options+=(-it); fi
 step "Run Docker compiler ($mode)" docker run "${options[@]}" "$image" "$mode"

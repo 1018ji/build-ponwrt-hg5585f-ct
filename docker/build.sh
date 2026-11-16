@@ -76,6 +76,26 @@ recipe=$build_root/recipe
 source=$build_root/openwrt
 output=/output/$bundle
 export build_root recipe source output
+# Keep the original absolute path: cached tools and make dependency files use it.
+if [ "${HG5585F_REUSE_TREE:-0}" = 1 ] && [ ! -d "$source" ]; then
+  previous=$(python3 /recipe/scripts/upgrade-source.py select /workdir/trees)
+  if [ -n "$previous" ]; then
+    build_root=$previous
+    recipe=$build_root/recipe
+    source=$build_root/openwrt
+    log "INFO  Reusing verified source at $source for bundle=$bundle"
+  else
+    log 'INFO  No compatible previous tree; preparing a separate build tree'
+  fi
+fi
+# Save the previous recipe before the snapshot replaces it.
+if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
+  if [ ! -f "$recipe/source.json" ]; then
+    log 'FAIL  Existing source has no previous recipe manifest'
+    exit 1
+  fi
+  cp "$recipe/source.json" "$source/.hg5585f-source.json"
+fi
 mkdir -p "$recipe" "$output" /workdir/dl /workdir/ccache
 : > "$output/steps.log"
 log_file=$output/steps.log
@@ -84,8 +104,9 @@ step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --ex
 export CCACHE_DIR=/workdir/ccache CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
 export GITHUB_WORKSPACE="$recipe"
 step 'Run workflow path tests' python3 "$recipe/scripts/tests/test-workflow-paths.py"
+step 'Check incremental patch upgrade behavior' python3 "$recipe/scripts/tests/test-incremental.py"
 if [ ! -d "$source" ]; then
-  step 'Clone pinned OpenWrt source' bash -o pipefail -c '
+  step 'Clone pinned OpenWrt source' bash -euo pipefail -c '
     download_source=$(mktemp -d "$build_root/source.XXXXXX")
     rmdir "$download_source"
     trap '\''rm -rf "${download_source:-}"'\'' EXIT
@@ -94,8 +115,9 @@ if [ ! -d "$source" ]; then
     trap - EXIT
   '
 else
-  step 'Apply and verify pinned source patches' python3 "$recipe/scripts/prepare.py" apply "$source"
+  step 'Apply only newly appended source patches' python3 "$recipe/scripts/upgrade-source.py" apply "$source" "$source/.hg5585f-source.json"
 fi
+cp "$recipe/source.json" "$source/.hg5585f-source.json"
 cd "$source"
 step 'Check exported HG5585F patch bundle' python3 scripts/check-hg5585f-offload.py
 if [ ! -e dl ]; then step 'Link persistent package download cache' ln -s /workdir/dl dl; fi

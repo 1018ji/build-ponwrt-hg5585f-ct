@@ -28,6 +28,25 @@ HG5585F_JOBS=6 bash scripts/build-docker.sh build
 
 `HG5585F_JOBS` 就是传给 `make -j` 的任务数。你的 M5 默认读取为 10 个逻辑核心，即 `make -j10`。
 
+## 更新补丁后的增量编译
+
+宿主机执行下面的命令，复用 volume 中兼容的旧源码目录：
+
+```bash
+cd /Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct
+HG5585F_JOBS=6 bash scripts/build-docker.sh --reuse build
+```
+
+如果已经在旧容器 shell 中，用只读挂载的最新脚本执行：
+
+```bash
+HG5585F_REUSE_TREE=1 HG5585F_JOBS=6 bash /recipe/docker/build.sh build
+```
+
+`--reuse` 会校验旧构建的 manifest，保持源码的绝对路径不变，只应用新追加的补丁。工具链、下载包、软件包构建状态和 ccache 会继续保留。若原有补丁被修改或基准源码版本改变，会新建独立构建目录；检测到旧源码被本地修改时会停止，保留修改。
+
+本次新增内核补丁时，OpenWrt 可能重新准备、编译内核并重新打包固件，ccache 会加速重复编译。不能保证只重新编译单个驱动对象。每次成功准备源码后会记录 `.hg5585f-source.json`，用于下一次增量校验。
+
 ## 宿主机单独构建 image
 
 ```bash
