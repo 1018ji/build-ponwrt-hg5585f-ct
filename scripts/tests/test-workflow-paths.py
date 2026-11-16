@@ -102,6 +102,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
             self.write(Path('scripts')/name, stub)
         self.write(Path('recipe/scripts/prepare.py'), stub)
         self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
+        self.write(Path('recipe/scripts/tests/test-wed-irq-storm.py'), stub)
         self.write(Path('scripts/validate-build.sh'), full_validation())
 
     def write(self, path, contents=''):

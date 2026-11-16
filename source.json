@@ -30,6 +30,10 @@
     {
       "name": "0007-hg5585f-wed-port-and-probe-cleanup.patch",
       "sha256": "a68cdf1963676f710801039a51579f2464fafdad31d6807db64e6072ed3f151e"
+    },
+    {
+      "name": "0008-hg5585f-wed-attach-trace-and-irq-storm-guard.patch",
+      "sha256": "c1d6662abda7f5db67e7bd1e260ba7df2d120bcdd58e06ce2214b1463a8fdbe7"
     }
   ],
   "files": {
@@ -157,7 +161,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "f0e743afbf13e8390223b9037988bd1012b457f84a03f6255433517577c69c22",
+      "sha256": "24e9ff96e399f4883e107a059ad0c530af602bd582247aae4961dfd33b0ea85d",
       "executable": false,
       "reviewed": true
     },
@@ -267,12 +271,20 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "a448994c11fc21f4208d2cd11128976d60b7bf7b5223584c2b19adaa32602c39",
+      "sha256": "f782f4fedb7016448c3ebbbcdf5ce4b0cd8177a1fd1d28f8d03b2ff877e7ea2f",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "36e608d7f822a3988a1202bd3b8c40edd70a82f0d0e00b38447ec81a73d588d9",
+      "sha256": "fc1a742ccfc7e6ea909349d2725e1b1e9fa58a73000791bbfea3a42479356816",
       "executable": false
+    },
+    "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
+      "executable": false,
+      "sha256": "c3d78fc6f5767569f35db41b47e74b5426512a75bd6269856e892e47b38926df"
+    },
+    "scripts/tests/test-wed-irq-storm.py": {
+      "executable": false,
+      "sha256": "cdb4a4b08b59416d8b3e7b32558fb33166f68fb5e0d555b0277327d1a567b053"
     }
   },
   "feeds": {
