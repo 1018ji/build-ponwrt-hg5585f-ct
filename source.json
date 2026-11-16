@@ -38,6 +38,10 @@
     {
       "name": "0009-hg5585f-wed-extended-irq-masking.patch",
       "sha256": "483b46ce6308be580c2e45c89dcaa6da4822378699bdfdc0b34eca391b1629eb"
+    },
+    {
+      "name": "0010-hg5585f-wed-pcie-intx.patch",
+      "sha256": "e6e6a9727a2c92a479a0e91d9f1dfbff04d128c8d8dc5a73ae72f84ee4ca363a"
     }
   ],
   "files": {
@@ -275,11 +279,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "f782f4fedb7016448c3ebbbcdf5ce4b0cd8177a1fd1d28f8d03b2ff877e7ea2f",
+      "sha256": "9253114b2bdbe95b0663152ae586b6dfe6b65698888a2140549ee3adf8a0fffc",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "fc1a742ccfc7e6ea909349d2725e1b1e9fa58a73000791bbfea3a42479356816",
+      "sha256": "814be9fcd6aed0cc7703cad7386e3f23d79396cac90e236b604b131687d7ea32",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -292,6 +296,14 @@
     },
     "target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch": {
       "sha256": "c4f5abc3bb90c8867e71c8420fc09a3dc3d13483d1cc22d6823b140979b6a623",
+      "executable": false
+    },
+    "scripts/check-hg5585f-wed-pci-irq.py": {
+      "sha256": "39a67ccc81a2efc201f810a106b8d0360676c29e1eeca9608e45ade35448c327",
+      "executable": false
+    },
+    "package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch": {
+      "sha256": "00529542c755f245e88103cef5753da380aa107d6463139125d7b35814b2b8b4",
       "executable": false
     }
   },

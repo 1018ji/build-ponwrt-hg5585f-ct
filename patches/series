@@ -7,3 +7,4 @@
 0007-hg5585f-wed-port-and-probe-cleanup.patch
 0008-hg5585f-wed-attach-trace-and-irq-storm-guard.patch
 0009-hg5585f-wed-extended-irq-masking.patch
+0010-hg5585f-wed-pcie-intx.patch

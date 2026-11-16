@@ -98,7 +98,8 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
     log.write(json.dumps(sys.argv) + '\\n')
 '''
         for name in ('check-hg5585f-ppe-accounting.py', 'check-hg5585f-rom-abi.py',
-                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-images.py'):
+                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-wed-pci-irq.py',
+                     'check-hg5585f-images.py'):
             self.write(Path('scripts')/name, stub)
         self.write(Path('recipe/scripts/prepare.py'), stub)
         self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
@@ -168,6 +169,10 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
         self.assertIn(str(self.mt76), result.stdout)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        irq_calls = [args for args in calls if 'check-hg5585f-wed-pci-irq.py' in args[0]]
+        self.assertEqual(irq_calls, [['scripts/check-hg5585f-wed-pci-irq.py',
+                                     '--mt76', str(self.mt76), '--kernel', str(self.kernel)]])
 
     def test_other_mt76_version_and_unrelated_directory(self):
         other = self.kernel.parent/'mt76-2026-11-16-abcdef12'

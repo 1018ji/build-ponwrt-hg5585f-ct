@@ -1,0 +1,182 @@
+diff --git a/package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch b/package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch
+new file mode 100644
+index 0000000..fa87128
+--- /dev/null
++++ b/package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch
+@@ -0,0 +1,27 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: use INTx for Airoha WED PCIe completion polling
++
++The Airoha backend polls PCIe INTx status at bit 24. Allowing MSI for the
++primary WLAN HIF leaves WED TX and TX-free completion indices at zero,
++even while MT7916 consumes packets and produces TX-free notifications.
++Require INTx only when attached to Airoha WED. Keep the native MSI/MSI-X
++selection and generic WED vector ownership unchanged.
++
++On HG5585F CT, changing only this selection restores WED completion ring
++progress and allows a Wi-Fi 6 client to discover and associate with the AP.
++
++diff --git a/mt7915/pci.c b/mt7915/pci.c
++--- a/mt7915/pci.c
+++++ b/mt7915/pci.c
++@@ -184,7 +184,10 @@
++ 			hif2 = mt7915_pci_init_hif2(pdev);
++ 
++ 		stage = "irq_vectors";
++-		ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+++		/* Airoha WED polls PCIe INTx to fetch WPDMA completions. */
+++		ret = pci_alloc_irq_vectors(pdev, 1, 1,
+++			mt76_wed_is_airoha(mdev) ? PCI_IRQ_INTX :
+++			PCI_IRQ_ALL_TYPES);
++ 		if (ret < 0) {
++ 			goto free_wed_or_irq_vector;
++ 		}
+diff --git a/scripts/check-hg5585f-wed-pci-irq.py b/scripts/check-hg5585f-wed-pci-irq.py
+new file mode 100644
+index 0000000..850f7c9
+--- /dev/null
++++ b/scripts/check-hg5585f-wed-pci-irq.py
+@@ -0,0 +1,106 @@
++#!/usr/bin/env python3
++"""Exercise the built MT7915 PCI vector path for Airoha, native and generic WED."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def vector_block(text):
++    start = text.index('if (!ret || mt76_wed_is_airoha(mdev))')
++    brace = text.index('{', start)
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76', type=Path, required=True)
++    parser.add_argument('--kernel', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    pci = (args.kernel/'include/linux/pci.h').read_text()
++    names = ('PCI_IRQ_INTX', 'PCI_IRQ_MSI', 'PCI_IRQ_MSIX', 'PCI_IRQ_ALL_TYPES')
++    definitions = [re.search(r'^#define ' + name + r'\s+[^\n]+', pci, re.M).group()
++                   for name in names]
++    code = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++struct pci_dev { int irq; };
++struct mt76_dev { bool airoha; struct { bool npu_legacy_rx; } mmio; };
++struct mt7915_hif { int unused; };
++static unsigned int calls, flags, hif_calls, frees;
++static bool legacy_available;
++static bool mt76_wed_is_airoha(struct mt76_dev *mdev) { return mdev->airoha; }
++static struct mt7915_hif *mt7915_pci_init_hif2(struct pci_dev *pdev)
++{ (void)pdev; hif_calls++; return NULL; }
++/* A PCI device supporting MSI prefers it, as the real PCI core does. */
++static int pci_alloc_irq_vectors(struct pci_dev *pdev, int min, int max, unsigned int mask)
++{
++    assert(min == 1 && max == 1);
++    calls++; flags = mask;
++    if (mask & (PCI_IRQ_MSI | PCI_IRQ_MSIX)) { pdev->irq = 54; return 1; }
++    if ((mask & PCI_IRQ_INTX) && legacy_available) { pdev->irq = 29; return 1; }
++    return -ENOSPC;
++}
++static void pci_free_irq_vectors(struct pci_dev *pdev) { (void)pdev; frees++; }
++static int probe_vector_path(struct pci_dev *pdev, struct mt76_dev *mdev, int ret)
++{
++    struct mt7915_hif *hif2 = NULL;
++    const char *stage = NULL;
++    bool pci_irq = false;
++    int irq = 77; /* IRQ already supplied by a generic WED backend. */
++'''
++    code += vector_block((args.mt76/'mt7915/pci.c').read_text())
++    code += r'''
++    (void)hif2;
++    if (pci_irq) {
++        assert(stage && !strcmp(stage, "irq_vectors"));
++        pci_free_irq_vectors(pdev);
++    }
++    return irq;
++free_wed_or_irq_vector:
++    assert(!pci_irq);
++    return ret;
++}
++static void reset(void) { calls = flags = hif_calls = frees = 0; legacy_available = true; }
++int main(void)
++{
++    struct pci_dev pdev = {0};
++    struct mt76_dev mdev = {.airoha = true};
++    reset();
++    /* WED polls legacy INTx; selecting MSI silently stalls its completion rings. */
++    assert(probe_vector_path(&pdev, &mdev, 1) == 29);
++    assert(calls == 1 && flags == PCI_IRQ_INTX && frees == 1 && hif_calls == 1);
++    reset(); mdev.mmio.npu_legacy_rx = true;
++    assert(probe_vector_path(&pdev, &mdev, 1) == 29);
++    assert(flags == PCI_IRQ_INTX && hif_calls == 0 && frees == 1);
++    reset(); legacy_available = false;
++    assert(probe_vector_path(&pdev, &mdev, 1) == -ENOSPC);
++    assert(calls == 1 && flags == PCI_IRQ_INTX && !frees); /* no MSI fallback */
++    reset(); mdev.airoha = false; mdev.mmio.npu_legacy_rx = false;
++    assert(probe_vector_path(&pdev, &mdev, 0) == 54);
++    assert(flags == PCI_IRQ_ALL_TYPES && frees == 1 && hif_calls == 1);
++    reset();
++    assert(probe_vector_path(&pdev, &mdev, 1) == 77);
++    assert(!calls && !flags && !frees && !hif_calls);
++    puts("PASS: Airoha WED uses INTx, rejects unavailable INTx; native MSI and generic WED vector ownership preserved");
++}
++'''
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-pci-irq-') as temporary:
++        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        source.write_text('\n'.join(definitions) + '\n' + code)
++        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+index 12bf0e6..382e1f7 100644
+--- a/scripts/tests/test-workflow-paths.py
++++ b/scripts/tests/test-workflow-paths.py
+@@ -98,7 +98,8 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
+     log.write(json.dumps(sys.argv) + '\\n')
+ '''
+         for name in ('check-hg5585f-ppe-accounting.py', 'check-hg5585f-rom-abi.py',
+-                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-images.py'):
++                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-wed-pci-irq.py',
++                     'check-hg5585f-images.py'):
+             self.write(Path('scripts')/name, stub)
+         self.write(Path('recipe/scripts/prepare.py'), stub)
+         self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
+@@ -168,6 +169,10 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
+         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+         self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+         self.assertIn(str(self.mt76), result.stdout)
++        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
++        irq_calls = [args for args in calls if 'check-hg5585f-wed-pci-irq.py' in args[0]]
++        self.assertEqual(irq_calls, [['scripts/check-hg5585f-wed-pci-irq.py',
++                                     '--mt76', str(self.mt76), '--kernel', str(self.kernel)]])
+ 
+     def test_other_mt76_version_and_unrelated_directory(self):
+         other = self.kernel.parent/'mt76-2026-11-16-abcdef12'
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+index 7361f59..d144fdf 100644
+--- a/scripts/validate-build.sh
++++ b/scripts/validate-build.sh
+@@ -38,6 +38,7 @@ for kernel_config in "${kernel_configs[@]}"; do
+     echo "Checking built MT76 source: $mt76"
+     python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
+     python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
++    python3 scripts/check-hg5585f-wed-pci-irq.py --mt76 "$mt76" --kernel "$kernel"
+     mt76_found=$((mt76_found + 1))
+   done
+   [ "$mt76_found" -gt 0 ] || {
