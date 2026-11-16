@@ -19,7 +19,7 @@ case "$mode" in
   *) echo 'Usage: build.sh [build|shell|check]' >&2; exit 2 ;;
 esac
 
-jobs=${HG5585F_JOBS:-4}
+jobs=${HG5585F_JOBS:-$(nproc)}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'HG5585F_JOBS must be a positive integer' >&2; exit 2; }
 bundle=$(sha256sum /recipe/source.json | cut -c1-16)
 build_root=/workdir/trees/$bundle
@@ -57,7 +57,7 @@ fi
 make defconfig
 python3 "$recipe/scripts/prepare.py" config .config
 make download -j"$jobs" 2>&1 | tee "$output/download.log"
-printf 'Building %s with %s jobs; incremental state: %s\n' "$bundle" "$jobs" "$source"
+printf 'Building %s with make -j%s; incremental state: %s\n' "$bundle" "$jobs" "$source"
 if ! make -j"$jobs" 2>&1 | tee "$output/build.log"; then
   make -j1 V=s 2>&1 | tee -a "$output/build.log"
 fi
