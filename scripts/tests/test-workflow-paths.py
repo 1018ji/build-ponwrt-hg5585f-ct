@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import textwrap
@@ -14,11 +15,66 @@ WORKFLOW = RECIPE/'.github/workflows/hg5585f-ct-builder.yml'
 
 
 def source_validation():
+    text = (RECIPE/'scripts/validate-build.sh').read_text()
+    return text.split('\nfor profile in native wed npu;', 1)[0]
+
+
+def workflow_step(name):
     text = WORKFLOW.read_text()
-    start = text.index('      - name: Validate actual kernel, ROM ABI and image profiles\n')
-    start = text.index('        run: |\n', start) + len('        run: |\n')
-    end = text.index('          for profile in native wed npu;', start)
-    return textwrap.dedent(text[start:end])
+    start = text.index('      - name: ' + name + '\n')
+    end = text.find('\n      - name: ', start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+class WorkflowUploads(unittest.TestCase):
+    def test_firmware_upload_follows_build_and_precedes_checks(self):
+        names = re.findall(r'^      - name: (.+)$', WORKFLOW.read_text(), re.M)
+        build = names.index('Build native, WED and NPU firmware')
+        self.assertEqual(names[build + 1], 'Upload built firmware')
+        self.assertEqual(names[build + 2], 'Validate actual kernel, ROM ABI and image profiles')
+        upload = workflow_step('Upload built firmware')
+        self.assertIn('uses: actions/upload-artifact@v4', upload)
+        self.assertIn("steps.firmware.outcome == 'success'", upload)
+        self.assertNotIn('steps.validation', upload)
+        report = workflow_step('Upload validation report')
+        self.assertIn("steps.validation.outcome == 'failure'", report)
+        self.assertNotIn('continue-on-error', workflow_step(
+            'Validate actual kernel, ROM ABI and image profiles'))
+
+    def test_validation_failure_preserves_log_and_exit_status(self):
+        step = workflow_step('Validate actual kernel, ROM ABI and image profiles')
+        command = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory(prefix='hg5585f-validation-log-') as temporary:
+            root = Path(temporary)
+            script = root/'scripts/validate-build.sh'
+            script.parent.mkdir()
+            script.write_text('echo "test validation output"\necho "test validation error" >&2\nexit 7\n')
+            env = dict(os.environ, GITHUB_WORKSPACE=str(root))
+            result = subprocess.run(['bash', '-euo', 'pipefail', '-c', command],
+                                    cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+            self.assertEqual((root/'hg5585f-validation.log').read_text(),
+                             'test validation output\ntest validation error\n')
+
+    def test_firmware_artifact_includes_itb_and_bin_profiles(self):
+        step = workflow_step('Upload built firmware')
+        text = step.split('          path: |\n', 1)[1].split('          if-no-files-found:', 1)[0]
+        patterns = textwrap.dedent(text).splitlines()
+        with tempfile.TemporaryDirectory(prefix='hg5585f-upload-layout-') as temporary:
+            root = Path(temporary)
+            output = root/'openwrt/bin/targets/airoha/an7581'
+            output.mkdir(parents=True)
+            expected = set()
+            for profile in ('ct', 'ct-wed', 'ct-npu'):
+                for suffix in ('initramfs-recovery.itb', 'squashfs-sysupgrade.itb',
+                               'squashfs-sysupgrade.bin'):
+                    path = output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-{suffix}'
+                    path.touch()
+                    expected.add(path)
+            unrelated = output/'ponwrt-airoha-an7581-other-device-sysupgrade.itb'
+            unrelated.touch()
+            uploaded = {path for pattern in patterns for path in root.glob(pattern)}
+            self.assertEqual(uploaded, expected)
 
 
 class WorkflowPaths(unittest.TestCase):

@@ -226,61 +226,35 @@ jobs:
             timeout -k 60 "$remaining" make -j1 V=s
           }
 
+      - name: Upload built firmware
+        id: upload-firmware
+        if: ${{ !cancelled() && steps.firmware.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hg5585f-ct-${{ github.run_number }}
+          path: |
+            openwrt/bin/targets/airoha/an7581/*fiberhome_hg5585f-ct-*.itb
+            openwrt/bin/targets/airoha/an7581/*fiberhome_hg5585f-ct-*.bin
+            openwrt/bin/targets/airoha/an7581/sha256sums
+            openwrt/bin/targets/airoha/an7581/*.buildinfo
+            source.json
+          if-no-files-found: error
+
       - name: Validate actual kernel, ROM ABI and image profiles
+        id: validation
+        if: ${{ !cancelled() && steps.firmware.outcome == 'success' }}
         working-directory: openwrt
         run: |
-          export PATH="$PWD/staging_dir/host/bin:$PATH"
-          shopt -s nullglob
-          kernel_configs=(build_dir/target-*/linux-airoha_an7581/linux-[0-9]*/.config)
-          [ "${#kernel_configs[@]}" -eq 1 ] || {
-            echo "Expected one configured AN7581 kernel; found ${#kernel_configs[@]}"
-            if [ "${#kernel_configs[@]}" -gt 0 ]; then
-              printf 'Kernel candidate: %s\n' "${kernel_configs[@]}"
-            fi
-            exit 1
-          }
-          for kernel_config in "${kernel_configs[@]}"; do
-            [ -f "$kernel_config" ] || { echo "Kernel config missing: $kernel_config"; exit 1; }
-            kernel=${kernel_config%/.config}
-            echo "Checking built kernel source: $kernel"
-            python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
-            python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
-            mt76_found=0
-            for mt76 in "${kernel%/*}"/mt76-*; do
-              [ -d "$mt76" ] || continue
-              [ -f "$mt76/mt7915/pci.c" ] || continue
-              [ -f "$mt76/npu_rx_legacy.c" ] || {
-                echo "MT76 NPU RX source missing: $mt76/npu_rx_legacy.c"; exit 1;
-              }
-              echo "Checking built MT76 source: $mt76"
-              python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
-              python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
-              mt76_found=$((mt76_found + 1))
-            done
-            [ "$mt76_found" -gt 0 ] || {
-              echo "MT76 build directory missing under: ${kernel%/*}"
-              find "${kernel%/*}" -maxdepth 2 -type d -name 'mt76*' -print
-              exit 1
-            }
-          done
-          for profile in native wed npu; do
-            case "$profile" in
-              native) pattern='*fiberhome_hg5585f-ct-*'; flag= ;;
-              wed) pattern='*fiberhome_hg5585f-ct-wed-*'; flag=--wed ;;
-              npu) pattern='*fiberhome_hg5585f-ct-npu-*'; flag=--npu ;;
-            esac
-            count=0
-            while IFS= read -r image; do
-              case "$profile:$image" in native:*-ct-wed-*|native:*-ct-npu-*) continue ;; esac
-              if [ -n "$flag" ]; then
-                python3 scripts/check-hg5585f-images.py "$flag" "$image"
-              else
-                python3 scripts/check-hg5585f-images.py "$image"
-              fi
-              count=$((count + 1))
-            done < <(find bin/targets/airoha/an7581 -maxdepth 1 -name "$pattern.itb" -type f)
-            [ "$count" -ge 2 ] || { echo "Missing recovery/sysupgrade images for $profile"; exit 1; }
-          done
+          set -o pipefail
+          bash "$GITHUB_WORKSPACE/scripts/validate-build.sh" 2>&1 | tee "$GITHUB_WORKSPACE/hg5585f-validation.log"
+
+      - name: Upload validation report
+        if: ${{ !cancelled() && (steps.validation.outcome == 'success' || steps.validation.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hg5585f-ct-validation-${{ github.run_number }}
+          path: hg5585f-validation.log
+          if-no-files-found: error
 
       - name: Check compiler cache contents
         id: compiler-ready
@@ -322,14 +296,6 @@ jobs:
           if [ "$TOOLS_SAVED" = success ]; then keep_latest 'hg5585f-tools-v1-'; fi
           if [ "$TOOLCHAIN_SAVED" = success ]; then keep_latest 'hg5585f-toolchain-v1-'; fi
           if [ "$COMPILER_SAVED" = success ]; then keep_latest "hg5585f-ccache-v1-$PLATFORM-"; fi
-
-      - name: Upload validated firmware
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hg5585f-ct-${{ github.run_number }}
-          path: openwrt/bin/targets/airoha/an7581/*fiberhome_hg5585f-ct-*.itb
-          if-no-files-found: error
 
       - name: Keep the current run and six completed runs
         if: always()
