@@ -110,8 +110,9 @@ def config(path, kernel=False):
     for option in required:
         assert values.get('CONFIG_' + option) == 'y', f'Missing CONFIG_{option}=y'
     if kernel:
-        assert values.get('CONFIG_NET_MEDIATEK_SOC') == 'n', \
-            'CONFIG_NET_MEDIATEK_SOC must be explicitly disabled for Airoha WED-only builds'
+        mediatek_soc = values.get('CONFIG_NET_MEDIATEK_SOC')
+        assert mediatek_soc not in ('y', 'm'), \
+            'CONFIG_NET_MEDIATEK_SOC must not be enabled for Airoha WED-only builds'
     print('PASS: ' + ('built kernel' if kernel else 'generated firmware') + ' configuration')
 
 
