@@ -39,6 +39,7 @@ for kernel_config in "${kernel_configs[@]}"; do
     python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
     python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
     python3 scripts/check-hg5585f-wed-pci-irq.py --mt76 "$mt76" --kernel "$kernel"
+    python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
     mt76_found=$((mt76_found + 1))
   done
   [ "$mt76_found" -gt 0 ] || {
