@@ -26,19 +26,6 @@ index 0000000..60643e8
 + 
 + 	ret = dma_set_mask(wed->dev, DMA_BIT_MASK(32));
 + 	if (ret)
-diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
-index 200ceb0..273c4a0 100644
---- a/scripts/check-hg5585f-offload.py
-+++ b/scripts/check-hg5585f-offload.py
-@@ -18,6 +18,8 @@ patches = [root / 'target/linux/airoha/patches-6.18' / name for name in (
-     '941-net-airoha-mask-wed-extended-interrupts.patch',
-     '942-clk-en7523-fix-reset-control-state.patch',
-     '943-net-airoha-fix-npu-probe-reset-lifecycle.patch',
-+    '944-net-airoha-ppe-clear-stale-enable.patch',
-+    '945-mt7915-airoha-npu-preserve-dma-device.patch',
- )]
- patches += sorted((root / 'package/kernel/mt76/patches').glob('*.patch'))
- for patch in patches:
 diff --git a/scripts/tests/check-npu-dma-device.py b/scripts/tests/check-npu-dma-device.py
 new file mode 100644
 index 0000000..88dd804

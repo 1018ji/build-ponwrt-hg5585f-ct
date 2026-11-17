@@ -57,7 +57,11 @@
     },
     {
       "name": "0014-hg5585f-npu-dma-device.patch",
-      "sha256": "7b01b34a502d297e29905ddf18a7ab763c4104688c1cb3244dfaad9eec4d711d"
+      "sha256": "59a68c2650eaaa2ee2a42ff7e1ddd2a999aa9a4eaf9362b86d3bd06cbddd90f0"
+    },
+    {
+      "name": "0015-hg5585f-npu-input-ring-768.patch",
+      "sha256": "5fb3d5d8be1d14b5c2fa527752538c5e43f781b412497a6b59ce0bd71900375f"
     }
   ],
   "files": {
@@ -185,7 +189,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "e885747726bf0c11c219a4f53cf7012c907aaff9c1f32b142587786f83fbc2a0",
+      "sha256": "5d3d4c03bac4a72348d7268ee200504323f62f844c6c227cf33b374e6d428865",
       "executable": false,
       "reviewed": true
     },
@@ -295,11 +299,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "4aa2597ddb2b2c5de9aa16d1605944c5c615a6d32c2ebac21d09bacb0c95d010",
+      "sha256": "7f70e58d55c75f5756dbd652bc61e59dc10c5f73c88071b4a4b1bf134b86fae4",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "f8ded6b7ffc8bd98c14b3e07145be12ad562071715f45afd6147f45856af7f14",
+      "sha256": "e83855f3018b960472b501beb9545b2c210e463195580e1da2d6b8f49e0a070a",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -356,6 +360,18 @@
     },
     "scripts/tests/check-npu-dma-device.py": {
       "sha256": "af25cd22485ac29c0f5f93ae4fb2eb0cb959279b4f03e31b279cfe67e2aa25b9",
+      "executable": false
+    },
+    "scripts/check-hg5585f-npu-input-ring.py": {
+      "sha256": "b6c81eb60ceecd726a333e46fc6d4afbe0a594a9bb17f7988f1f6c95b988c68c",
+      "executable": false
+    },
+    "package/kernel/mt76/patches/126-mt7915-airoha-npu-input-ring-768.patch": {
+      "sha256": "9d815d95dd59edcd9f0bec9853d6118a39ffcb943cd18a9fe45b5fd80f9015bb",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/945-net-airoha-match-hg5585f-npu-input-ring.patch": {
+      "sha256": "c1c644fc5743109944f7b566ed80c8e3778520e06381621effc38700f63a32c1",
       "executable": false
     }
   },

@@ -100,6 +100,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         for name in ('check-hg5585f-ppe-accounting.py', 'check-hg5585f-rom-abi.py',
                      'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-wed-pci-irq.py',
                      'check-hg5585f-wed-rx-irq.py',
+                     'check-hg5585f-npu-input-ring.py',
                      'check-hg5585f-images.py'):
             self.write(Path('scripts')/name, stub)
         self.write(Path('recipe/scripts/prepare.py'), stub)
@@ -179,6 +180,10 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
                                      '--mt76', str(self.mt76), '--kernel', str(self.kernel)]])
         rx_calls = [args for args in calls if 'check-hg5585f-wed-rx-irq.py' in args[0]]
         self.assertEqual(rx_calls, [['scripts/check-hg5585f-wed-rx-irq.py', '--mt76', str(self.mt76)]])
+        input_calls = [args for args in calls if 'check-hg5585f-npu-input-ring.py' in args[0]]
+        self.assertEqual(input_calls, [['scripts/check-hg5585f-npu-input-ring.py',
+            '--header', str(self.kernel/'include/linux/soc/airoha/airoha_wlan_legacy.h'),
+            '--mt76', str(self.mt76), '--firmware', 'files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin']])
 
     def test_other_mt76_version_and_unrelated_directory(self):
         other = self.kernel.parent/'mt76-2026-11-16-abcdef12'
