@@ -98,6 +98,10 @@
     {
       "name": "0024-hg5585f-wed-select-followup-tokens.patch",
       "sha256": "a0479644fc8eee44f4b42f07fbb54817bffe72f6b7f9664b28a4897014329b8c"
+    },
+    {
+      "name": "0025-hg5585f-wed-init-followup-saved-index.patch",
+      "sha256": "c12c4c43778a29d5f796140bc231c32d7b3756fccd89475b338f56f1ce57d452"
     }
   ],
   "files": {
@@ -462,7 +466,7 @@
       "executable": false
     },
     "target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch": {
-      "sha256": "6597b1e293a382a53341e98a101aec78647ce406d084108d3b6f5575bdab24c2",
+      "sha256": "da8149ed083b82d6773d22ac453338d96f746dd3ea69e0993dbc3bbf76013580",
       "executable": false
     }
   },
