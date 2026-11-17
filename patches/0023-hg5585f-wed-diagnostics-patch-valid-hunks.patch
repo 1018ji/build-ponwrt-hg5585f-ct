@@ -1,0 +1,119 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] debug: restore valid nested WED diagnostic patch
+
+Regenerate the nested diagnostic patch from the actual 0022 output so its
+hunk ranges and embedded source are consistent.
+
+Signed-off-by: PonWrt developers <noreply@localhost>
+---
+diff --git a/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch b/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch
+--- a/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch
++++ b/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch
+@@ -1,15 +1,9 @@
+ From: PonWrt developers <noreply@localhost>
+-Subject: [PATCH] net: airoha: capture first WED token and coherent errors
++Subject: [PATCH] net: airoha: capture WED diagnostics with valid hunk ranges
+ 
+-Count each extended error bit independently of console ratelimiting.
+-Keep separate bounded snapshots for missing-payload and RX coherent
+-events before W1C acknowledgment. Record native and shadow ring
+-positions and allocated coherent descriptors without following DMA
+-pointers or changing hardware state. Hardware-owned snapshots can move.
+-
+-Decode bounded CPU-owned TX-free notifications supplied by mt76 and
+-save the preceding and following host views. Expose records through a
+-root-readable debugfs file, retaining existing error logs and masks.
++Refresh the generated WED diagnostic patch after expanding the bounded
++TX-free record and attaching follow-up token candidates. Keep the inner
++patch syntactically valid so build-time patch checks can apply it.
+ 
+ Signed-off-by: PonWrt developers <noreply@localhost>
+ ---
+@@ -43,7 +37,7 @@
+  	struct device_node *pcie;
+  	void __iomem *base;
+  	void __iomem *wdma;
+-@@ -240,6 +246,328 @@
++@@ -240,6 +246,343 @@
+  	return 0;
+  }
+  
+@@ -237,7 +231,7 @@
+ +	struct airoha_wed_free_record record;
+ +	struct airoha_wed_diag *diag;
+ +	unsigned long flags;
+-+	unsigned int i, candidate;
+++	unsigned int i;
+ +
+ +	if (!wed->airoha || !wed->priv)
+ +		return;
+@@ -251,6 +245,8 @@
+ +	record.sequence = ++diag->state.notifications;
+ +	diag->state.latest = record;
+ +	for (i = 0; i < ARRAY_SIZE(diag->state.first); i++) {
+++		unsigned int candidate;
+++
+ +		if (!diag->state.first[i].valid || record.ns < diag->state.first[i].ns ||
+ +		    diag->state.first[i].host_after.sequence)
+ +			continue;
+@@ -385,7 +381,7 @@
+  #define AIROHA_WED_IRQ_STORM_LIMIT	20000
+  
+  static bool airoha_wed_irq_progress(struct airoha_wed *aw)
+-@@ -331,6 +659,7 @@
++@@ -331,6 +674,7 @@
+  	/* Which status bits keep asserting; rate limited by the dbg macro. */
+  	airoha_wlan_dbg(aw->dev, "wed", "event=irq raw=%08x mask=%08x ext=%08x",
+  			raw, mask, ext);
+@@ -393,7 +389,7 @@
+  	if (status)
+  		airoha_wed_write(wed, MTK_WED_INT_STATUS, status);
+  	if (errors) {
+-@@ -983,6 +1312,7 @@
++@@ -983,6 +1327,7 @@
+  {
+  	struct airoha_wed *aw = data;
+  
+@@ -401,7 +397,7 @@
+  	debugfs_remove(aw->debugfs);
+  	/* Managed device links detach the wireless consumer first. */
+  	mutex_lock(&airoha_wed_lock);
+-@@ -994,6 +1324,12 @@
++@@ -994,6 +1339,12 @@
+  	of_node_put(aw->pcie);
+  }
+  
+@@ -414,7 +410,7 @@
+  static int airoha_wed_probe(struct platform_device *pdev)
+  {
+  	struct device *dev = &pdev->dev;
+-@@ -1005,6 +1341,10 @@
++@@ -1005,6 +1356,10 @@
+  	aw = devm_kzalloc(dev, sizeof(*aw), GFP_KERNEL);
+  	if (!aw)
+  		return -ENOMEM;
+@@ -425,7 +421,7 @@
+  	aw->dev = dev;
+  	INIT_WORK(&aw->irq_fault_work, airoha_wed_irq_fault_work);
+  	mutex_init(&aw->quiesce_lock);
+-@@ -1051,6 +1391,7 @@
++@@ -1051,6 +1406,7 @@
+  	if (!err) {
+  		aw->debugfs = debugfs_create_file("airoha-wed", 0444, NULL, aw,
+  						&airoha_wed_status_fops);
+@@ -434,7 +430,6 @@
+  	}
+  error_node:
+ diff --git a/drivers/net/ethernet/airoha/airoha_wed_diag.h b/drivers/net/ethernet/airoha/airoha_wed_diag.h
+-new file mode 100644
+ --- /dev/null
+ +++ b/drivers/net/ethernet/airoha/airoha_wed_diag.h
+ @@ -0,0 +1,163 @@
+@@ -602,7 +597,6 @@
+ +
+ +#endif
+ diff --git a/include/linux/soc/airoha/airoha_wed_diag.h b/include/linux/soc/airoha/airoha_wed_diag.h
+-new file mode 100644
+ --- /dev/null
+ +++ b/include/linux/soc/airoha/airoha_wed_diag.h
+ @@ -0,0 +1,23 @@
