@@ -129,6 +129,7 @@ if [ ! -f .config ]; then
 else
   log 'INFO  Reusing existing OpenWrt configuration'
 fi
+step 'Merge HG5585F profile configuration' bash -o pipefail -c './scripts/kconfig.pl + .config configs/hg5585f-ct.config > .config.merged && mv .config.merged .config'
 step 'Update pinned package feeds' bash -o pipefail -c './scripts/feeds update -a'
 step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-theme-bootstrap luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia'
 step 'Resolve final OpenWrt configuration' make defconfig
