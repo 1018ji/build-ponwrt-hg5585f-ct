@@ -11,7 +11,21 @@
 
 新增的 bridge 路径修复：`nft_dev_fill_bridge_path()` 原本把 `net_device_path_ctx` 全部置零。手机关联时，实机只读探针证实这会返回 `DEV_PATH_AIROHA_WDMA`，通用 flowtable 解析器不接受该类型，因而 PPE `replace_calls` 始终为 0。与 routed 路径一致设置 `ieee80211=true` 后，上游拿到支持的 `DEV_PATH_IEEE80211`；PPE 仍在自己的 egress 准备阶段单独获取 WDMA 参数。
 
-该修复已单独编译为 `nf_flow_table.ko` 并临时加载，磁盘模块未替换。回归测试执行实际 bridge 路径函数和解析器，包含旧实现失败的负对照、DSA/VLAN 处理和路径错误。实际 iperf/PPE 绑定效果仍需结合新一轮流量确认，不能由路径探针单独推断。
+该修复已单独编译为 `nf_flow_table.ko` 并临时加载，磁盘模块未替换。回归测试执行实际 bridge 路径函数和解析器，包含旧实现失败的负对照、DSA/VLAN 处理和路径错误。
+
+### 2026-11-17 实机结果：能建表，但硬件接管后丢包
+
+这行修改恢复的是建表入口，**当前仍不是可用的完整硬件转发版本**。首个临时模块编译脚本遗漏了重定位 `nf_flow_table.mod` 响应文件里的对象路径，导致链接旧对象；此轮结果无效。修正响应文件后，已比较模块 `.text` 并反汇编确认 `ieee80211=true` 的实际指令，然后重新测试。
+
+- 旧路径的临时分支计数：`eval=308500`、`bridge_failed=306050`、`added=0`；PPE `replace_calls=0`。
+- 正确链接的修复路径：`replace_calls=88`、`replace_success=22`，捕获到对应手机 `192.168.1.107` 与有线电脑 `192.168.1.163:5201` 的双向 BND；WDMA1 开始处理包。
+- 但 iperf 上传只传出 640 KiB，随后为 0；反向测试只交给发送端约 512 KiB，也持续重传、无后续进展。不能用低 CPU 或 BND 将其视为加速成功。
+- 同期出现三次 WED `0x00000002`，其位名是 `TKID_WO_PYLD`；WDMA1 处理计数最初停在 291，后续测试累计到 636。该异常是线索，尚未证明是全部丢包的根因。还需区分 Wi-Fi→LAN 的 FOE 出口与 LAN→WED 的 ACK/数据出口。
+- `reject_parse` 的最后错误是 `-EEXIST`，来自同一 PPE 通过多个设备回调收到重复规则，不能把它当作前端拒绝新规则。
+
+故障现场已保存到本机 `/private/tmp/hg5585f-flow-followup`。临时 `nf_flow_table`、`nft_flow_offload` 诊断模块和只读观察模块均已卸载，恢复固件原模块并清空故障 BND。恢复模块的 `.text` SHA256 为 `adaae29a8ec8106dee0b3ac199b4e82eb8920d1a923eec661fc079f0c4b455cd`，与编译缓存原版一致。
+
+在 FOE/WED 出口数据格式完成验证前，不将 948 当作已验证吞吐修复，也不重复用完整双向硬件绑定做盲测。下一步需要对照原厂 `PpeSetInfoBlk2`、`wifi_tx_tuple_add`、`wifi_fbuf_init` 和 WED/WDMA 实际包头、token 信息，分别验证两个方向。
 
 ## 编译和测试
 
