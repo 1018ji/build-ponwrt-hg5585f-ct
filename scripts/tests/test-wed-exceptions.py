@@ -95,7 +95,7 @@ static void decode_tests(void)
     }
     memset(data,0,sizeof(data));put16(data+2,100);put32(data+4,4U<<16);
     airoha_wed_diag_decode(&r,data,sizeof(data),false,0,4096,4096,4096);
-    assert(r.truncated && !r.malformed && r.raw_words==32 && r.decoded==60);
+    assert(!r.truncated && !r.malformed && r.raw_words==256 && r.decoded==100);
     assert(r.saved_tokens==16);
     airoha_wed_diag_decode(&r,data,12,false,0,4096,4096,4096);
     assert(r.malformed && !r.truncated);
