@@ -147,6 +147,7 @@ static void capture_tests(void)
     assert(diag->state.count[18]==1 && diag->state.first[1].valid && diag->state.first[1].ns>stamp);
     airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
     assert(diag->state.first[0].host_after.sequence==2 && diag->state.first[1].host_after.sequence==2);
+    assert(diag->state.first[0].buffers[0].valid && diag->state.first[0].buffers[0].payload_valid);
     airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
     assert(diag->state.first[0].host_after.sequence==2 && diag->state.latest.sequence==3);
     /* Invalid geometry and pointers are recorded, never followed. */
