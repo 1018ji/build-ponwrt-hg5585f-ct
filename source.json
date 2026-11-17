@@ -106,6 +106,10 @@
     {
       "name": "0026-hg5585f-wed-remove-shadowed-candidate.patch",
       "sha256": "23cb4e433be1fb8537abbaead133e7fb5d5c2bff1b92190c019e8f93c068096d"
+    },
+    {
+      "name": "0027-hg5585f-wed-retain-all-candidates.patch",
+      "sha256": "5948c5c65e8af1c40c8fce583dbd0d69e959e41387aad6104fcff432af9e56f0"
     }
   ],
   "files": {
@@ -466,11 +470,11 @@
       "executable": false
     },
     "scripts/tests/test-wed-exceptions.py": {
-      "sha256": "f700bc6e317ec841d47b2b17536b6cf9884ac277e7182226f8fd29819376c0a8",
+      "sha256": "b6320af06f7bb7601c49efe31618d7ca5e81693e1ff0913fce5104fb2d2ad87a",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch": {
-      "sha256": "4c4034a15d0ce36097ab6894a034ef93228b65120bb7fea9e54ab804caa87bfb",
+      "sha256": "e9f42093def714a2a67b7664725a5d454a59aa14603ccf9b53fcc25ef16cd5c4",
       "executable": false
     }
   },
