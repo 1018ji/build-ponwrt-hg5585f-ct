@@ -78,6 +78,10 @@
     {
       "name": "0019-hg5585f-wed-irq-progress-and-quarantine.patch",
       "sha256": "5fa0bbfe1f79e192cc89073d0bb251939827630fd92dd1fc49f25a1bd83ccd9c"
+    },
+    {
+      "name": "0020-hg5585f-wed-exception-snapshots.patch",
+      "sha256": "df9848b77579d0a42203c5d79ba255b6939b8cc978e5abedb705cd548219d851"
     }
   ],
   "files": {
@@ -205,7 +209,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "5be56a7badb236a6d7d738a435af225433a454b805789a9be3f4adebee5481aa",
+      "sha256": "81a4b3ceca3588d9f430218486b57b179aa6f445749b4b687ff1bab1a46362ae",
       "executable": false
     },
     "scripts/check-hg5585f-rom-abi.py": {
@@ -314,11 +318,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "9750d57ea7dcb51b9f599b99ecde7f236d66e27a0ce183fabc091ad0e21dec9e",
+      "sha256": "e6a8e6941ed2db41130a662c0d3a996cc543dc7f32522ef16155d6e252cb9a6e",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "08948786ba081fbb74c46a7f02f41e064f14f4c29f1d48588f2a56aa8c3f5721",
+      "sha256": "b0410599b939711c5ea5aa809b0e905715e39e216afe59ef9c5bd01e2d7497ac",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -326,7 +330,7 @@
       "sha256": "c3d78fc6f5767569f35db41b47e74b5426512a75bd6269856e892e47b38926df"
     },
     "scripts/tests/test-wed-irq-storm.py": {
-      "sha256": "15b928cfc5dfdb600db8930820128b6e2be9dc1b9d4b1dcf8453283485994090",
+      "sha256": "229bf8dba596ce391f5e13b9666e078bf1f5932e033e33bab00cc756a0d81edc",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch": {
@@ -431,6 +435,18 @@
     },
     "target/linux/airoha/patches-6.18/949-net-airoha-classify-wed-irqs-and-drain-faults.patch": {
       "sha256": "cb185b1a6b12f1d15710875d08cc4b05c08521670a3628942ab3ff737b738785",
+      "executable": false
+    },
+    "package/kernel/mt76/patches/128-mt7915-record-airoha-txfree-diagnostics.patch": {
+      "sha256": "6fcc28e104d1b3fd307d7c345f0bf7835247f24d0cb78990606bd11871a63bf4",
+      "executable": false
+    },
+    "scripts/tests/test-wed-exceptions.py": {
+      "sha256": "66afbe3adeca8806d33fbd5077640a629904e1ef85e63f080fe7ac9e7fe122af",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch": {
+      "sha256": "e62bd88291d39021bc42e63f1cf54474ebfcec8201b8c901da4cf130715490f4",
       "executable": false
     }
   },

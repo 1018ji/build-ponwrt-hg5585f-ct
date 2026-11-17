@@ -112,6 +112,8 @@ static int set_wed(struct airoha_ppe_dev *ppe,bool enabled)
     assert(!enabled && airoha_wed_lock.held);
     assert(step++==0);ppe->enabled=enabled;return 0;
 }
+static void airoha_wed_diag_irq(struct mtk_wed_device *wed,u32 status,u32 errors)
+{ (void)wed;(void)status;(void)errors; }
 static int airoha_wed_quiesce(struct mtk_wed_device *wed)
 {
     assert(wed->priv->quiesce_lock.held);drains++;

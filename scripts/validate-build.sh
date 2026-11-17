@@ -27,6 +27,7 @@ for kernel_config in "${kernel_configs[@]}"; do
   python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
   python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
   python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-irq-storm.py" --kernel "$kernel"
+  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-exceptions.py" --kernel "$kernel"
   python3 "$GITHUB_WORKSPACE/scripts/tests/test-npu-lifecycle.py" --kernel "$kernel"
   python3 "$GITHUB_WORKSPACE/scripts/tests/test-ppe-flow-setup.py" --kernel "$kernel"
   python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-flow-blocks.py" --kernel "$kernel"

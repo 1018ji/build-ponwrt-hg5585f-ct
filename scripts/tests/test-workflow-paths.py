@@ -106,6 +106,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         self.write(Path('recipe/scripts/prepare.py'), stub)
         self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
         self.write(Path('recipe/scripts/tests/test-wed-irq-storm.py'), stub)
+        self.write(Path('recipe/scripts/tests/test-wed-exceptions.py'), stub)
         self.write(Path('recipe/scripts/tests/test-npu-lifecycle.py'), stub)
         self.write(Path('recipe/scripts/tests/test-ppe-flow-setup.py'), stub)
         self.write(Path('recipe/scripts/tests/test-wed-flow-blocks.py'), stub)
