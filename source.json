@@ -16,12 +16,8 @@
       "sha256": "3297f46e9ad5a35b2b86edc41bf3588549e8fb4375bd25c4e342bc746775d3bb"
     },
     {
-      "name": "0004-luci-hardware-accounting.patch",
-      "sha256": "097e6e575d6b07fa9fb88d9370c00903bb02ad485ef1a2418755d3cb8877da63"
-    },
-    {
       "name": "0005-hg5585f-build-profile.patch",
-      "sha256": "2ca56242c0bac9b516ede7060ae8d3fea91bab16ee1faceb7515939112f2f397"
+      "sha256": "e9b9dda0ad9f4c2eec7d4377c974893855fa5bf9b1f8589cb9f0ce769fd71d34"
     },
     {
       "name": "0006-hg5585f-wifi-review-and-diagnostics.patch",
@@ -256,44 +252,8 @@
       "sha256": "7727df2fd05be808e4b384b0ab2132e9cf565f86f2d062d282826f41d7f0ecaa",
       "executable": false
     },
-    "package/luci-app-airoha-npu/LICENSE": {
-      "sha256": "7f0f022815d9ffe57a2b9a717d49893f77bfed052f16af179dcb99dbbb6f6ab8",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/Makefile": {
-      "sha256": "c1da4f2fe293013a2197ade721c48ef6f449a1deb232df556abf31ce016886a5",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json": {
-      "sha256": "eef6d3e0e70d2a2c8c3e4b23c25e045de8c52972c818b75387db5b00ddea1729",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/root/usr/share/luci/menu.d/luci-app-airoha-npu.json": {
-      "sha256": "73b616a494cd3f9bdfb7beac5896c84cf7ee4a166bd476fd075580e0881714de",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu": {
-      "sha256": "64ca5028ad4e29bc05990e6790ec7ead2c8d6e1169c77a6a14c1066dc590d6cb",
-      "executable": true
-    },
-    "package/luci-app-airoha-npu/htdocs/luci-static/resources/view/airoha_npu/status.js": {
-      "sha256": "4fdddcd892ce5d9268cab06ac00ba7031da1b3109b15ba483e5fb2110b9decde",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/po/zh_Hans/luci-app-airoha-npu.po": {
-      "sha256": "e3514d342316e2dda0bf71aee0c9b32dd319bb8a112283ef3b30d2220bedfb5d",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/po/templates/luci-app-airoha-npu.pot": {
-      "sha256": "b3cdea24ca01a7a3c92fe403f74ce2f1125f7159746024d85cbdeafab3811c33",
-      "executable": false
-    },
-    "package/luci-app-airoha-npu/po/es/luci-app-airoha-npu.po": {
-      "sha256": "0aec414bdec187532c3199db3d604ee32a01811837ca77f8cebc9b5b7e4c3f9d",
-      "executable": false
-    },
     "configs/hg5585f-ct.config": {
-      "sha256": "c42fa2e771e9967b55b5c0b64181a079e9785d2ccc3a43bb8b7a50017459d8da",
+      "sha256": "bde3d2b251de988f85f281983a74146c259022632012c2a4e810a0fa4c693d53",
       "executable": false,
       "generated": true
     },

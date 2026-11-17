@@ -1,7 +1,6 @@
 0001-hg5585f-board-and-calibration.patch
 0002-airoha-wifi-npu-wed-ppe.patch
 0003-hg5585f-firmware-and-validation.patch
-0004-luci-hardware-accounting.patch
 0005-hg5585f-build-profile.patch
 0006-hg5585f-wifi-review-and-diagnostics.patch
 0007-hg5585f-wed-port-and-probe-cleanup.patch

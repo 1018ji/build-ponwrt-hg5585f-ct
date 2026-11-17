@@ -131,7 +131,7 @@ else
 fi
 step 'Merge HG5585F profile configuration' bash -o pipefail -c './scripts/kconfig.pl + .config configs/hg5585f-ct.config > .config.merged && mv .config.merged .config'
 step 'Update pinned package feeds' bash -o pipefail -c './scripts/feeds update -a'
-step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-theme-bootstrap luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia && sed -i "s#\$(TOPDIR)/feeds/luci/luci.mk#../../feeds/luci/luci.mk#" package/luci-app-airoha-npu/Makefile && sed -i "s#\$(TOPDIR)/feeds/luci/luci.mk#../../luci/luci.mk#" feeds/pon_userspace/luci-app-pon/Makefile'
+step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-theme-bootstrap luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia && sed -i "s#\$(TOPDIR)/feeds/luci/luci.mk#../../luci/luci.mk#" feeds/pon_userspace/luci-app-pon/Makefile'
 step 'Resolve final OpenWrt configuration' make defconfig
 step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
 step 'Download package sources' bash -o pipefail -c "make download -j\"$jobs\" 2>&1 | tee \"$output/download.log\""

@@ -90,7 +90,7 @@ def config(path, kernel=False):
                     'TARGET_ROOTFS_INITRAMFS', 'KERNEL_DEBUG_FS', 'PACKAGE_MAC80211_DEBUGFS',
                     'PACKAGE_kmod-mt7915e', 'PACKAGE_kmod-mt7916-firmware',
                     'PACKAGE_kmod-mac80211', 'PACKAGE_wpad-openssl',
-                    'PACKAGE_luci-app-airoha-npu', 'PACKAGE_luci-theme-bootstrap',
+                    'PACKAGE_luci-theme-bootstrap',
                     'PACKAGE_airoha-en7581-npu-firmware', 'PACKAGE_kmod-nft-offload',
                     'BUSYBOX_CUSTOM', 'BUSYBOX_CONFIG_DEVMEM', 'BUSYBOX_CONFIG_TASKSET']
         devices = {key for key, value in values.items()

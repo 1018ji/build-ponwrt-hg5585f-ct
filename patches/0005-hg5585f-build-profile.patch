@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..50492c9a89d31725f6d63ef5d040e2ae7504c6ca
 --- /dev/null
 +++ b/configs/hg5585f-ct.config
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,45 @@
 +CONFIG_TARGET_airoha=y
 +CONFIG_TARGET_airoha_an7581=y
 +CONFIG_TARGET_MULTI_PROFILE=y
@@ -34,8 +34,6 @@ index 0000000000000000000000000000000000000000..50492c9a89d31725f6d63ef5d040e2ae
 +CONFIG_PACKAGE_kmod-nf-flow=y
 +CONFIG_PACKAGE_luci=y
 +CONFIG_PACKAGE_luci-theme-bootstrap=y
-+CONFIG_PACKAGE_luci-app-airoha-npu=y
-+CONFIG_PACKAGE_luci-i18n-airoha-npu-zh-cn=y
 +CONFIG_LUCI_LANG_zh_Hans=y
 +CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
 +CONFIG_PACKAGE_luci-app-pon=y
