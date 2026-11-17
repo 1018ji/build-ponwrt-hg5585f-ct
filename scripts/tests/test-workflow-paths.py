@@ -109,6 +109,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
         self.write(Path('recipe/scripts/tests/test-npu-lifecycle.py'), stub)
         self.write(Path('recipe/scripts/tests/test-ppe-flow-setup.py'), stub)
         self.write(Path('recipe/scripts/tests/test-wed-flow-blocks.py'), stub)
+        self.write(Path('recipe/scripts/tests/test-bridge-wifi-path.py'), stub)
         self.write(Path('recipe/scripts/tests/test-ap-flowtable.py'), stub)
         self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
         self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)

@@ -66,6 +66,10 @@
     {
       "name": "0016-hg5585f-wifi-flowtable-diagnostics.patch",
       "sha256": "ae8d313a089465e97ecca7b6ef4aa6ccb2bdd9388e79a9b503624953180eabcf"
+    },
+    {
+      "name": "0017-hg5585f-bridge-wifi-forward-path.patch",
+      "sha256": "9379acf7646596dde3ebcea1abd6decbe36f1bef408056064529e59e036b9688"
     }
   ],
   "files": {
@@ -193,7 +197,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "643ad9ff3ed2f84ddd826d13ae60b27d3f0a20fd95afa64bf5dbefdf6b3e04e5",
+      "sha256": "5705a07fab966dfd4a02bec1da23a59cceb41fd59dc7e1e4f5d57ee3edcaecfa",
       "executable": false
     },
     "scripts/check-hg5585f-rom-abi.py": {
@@ -302,11 +306,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "914e2e0ec11e6cc397cfcf0997362c95cfef2afa4a243d868eed47142250938f",
+      "sha256": "32d15706d5d8ca2e43b4bb833b60a8cfcc8ce68918fe944b633568326be2dba2",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "5e97c3aad98c661fc8dc6fe2ae790ac42af4c2a1ea9889badf0f72849a5c9149",
+      "sha256": "16314ba85628a438ff2464f5d599b2d3c38b5771957f1ab1a649a6a627dac413",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -399,6 +403,14 @@
     },
     "scripts/tests/test-ppe-flow-setup.py": {
       "sha256": "9fa77d08efb21824512af8a3ab69b5cccd4beeb780966b8fdad08708b580e8d4",
+      "executable": false
+    },
+    "scripts/tests/test-bridge-wifi-path.py": {
+      "sha256": "4cc29cd647e31490eb10d5de72326d95ac58dddb5a8e15ff1ac286ba43725cd8",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/948-netfilter-flowtable-use-wifi-bridge-endpoint.patch": {
+      "sha256": "cceba1f6c0280327a5a1ed7d00d3473d32ed59b0d381d26641e610ee3c1c95f9",
       "executable": false
     }
   },

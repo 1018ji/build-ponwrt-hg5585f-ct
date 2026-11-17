@@ -9,6 +9,10 @@
 
 先前独立临时 bridge 表的实验未证明硬件转发生效；PPE 表是在打流结束后读取，不能排除短暂绑定后老化。新采样脚本每隔 5 秒保存一次绑定项，避免只看结束快照。
 
+新增的 bridge 路径修复：`nft_dev_fill_bridge_path()` 原本把 `net_device_path_ctx` 全部置零。手机关联时，实机只读探针证实这会返回 `DEV_PATH_AIROHA_WDMA`，通用 flowtable 解析器不接受该类型，因而 PPE `replace_calls` 始终为 0。与 routed 路径一致设置 `ieee80211=true` 后，上游拿到支持的 `DEV_PATH_IEEE80211`；PPE 仍在自己的 egress 准备阶段单独获取 WDMA 参数。
+
+该修复已单独编译为 `nf_flow_table.ko` 并临时加载，磁盘模块未替换。回归测试执行实际 bridge 路径函数和解析器，包含旧实现失败的负对照、DSA/VLAN 处理和路径错误。实际 iperf/PPE 绑定效果仍需结合新一轮流量确认，不能由路径探针单独推断。
+
 ## 编译和测试
 
 ```sh
