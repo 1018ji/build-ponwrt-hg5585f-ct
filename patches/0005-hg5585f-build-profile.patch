@@ -67,7 +67,7 @@ index d0be719bc11a5cd6885002a1681fbd78e22485d5..ced1c8305f853300a08ee939893cf564
 -#src-git oldpackages http://git.openwrt.org/packages.git
 -#src-link custom /usr/src/openwrt/custom-feed
 +src-git packages https://github.com/immortalwrt/packages.git^decf94639ffd6ddd26591c190b547c6b7eea150b
-+src-git luci https://github.com/immortalwrt/luci.git^ad75cde88e694b511100576bfbe0a280e5efe6ef
++src-git luci https://github.com/immortalwrt/luci.git^a6adca3c8f91ecc7c43dd04d3c23b252135c6c53
 +src-git pon_drivers https://github.com/pbs05/openwrt-pon-drivers.git^2789b970a6bfcc5ee56cee699622201b8061b67c
 +src-git pon_userspace https://github.com/pbs05/openwrt-pon-userspace.git^cce9d756742487b378749c606b30e13ee9b0f093
 diff --git a/files/etc/uci-defaults/99-hg5585f-hardware b/files/etc/uci-defaults/99-hg5585f-hardware

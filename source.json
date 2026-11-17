@@ -21,7 +21,7 @@
     },
     {
       "name": "0005-hg5585f-build-profile.patch",
-      "sha256": "0b76d5c1ac89d0a8e7e6bc2729d2127049cebfe4b908e39042bc6ed7d1762a23"
+      "sha256": "2ca56242c0bac9b516ede7060ae8d3fea91bab16ee1faceb7515939112f2f397"
     },
     {
       "name": "0006-hg5585f-wifi-review-and-diagnostics.patch",
@@ -303,7 +303,7 @@
       "reviewed": true
     },
     "feeds.conf.default": {
-      "sha256": "ca2b76510595e99c928f542dfd42ba938c0ce27128c2a138f690863ff59282de",
+      "sha256": "51cb86a92ba38c5e5a1e4789a748962c6feee3ce41d190d66b06b5652ed8e42e",
       "executable": false,
       "generated": true
     },
@@ -485,7 +485,7 @@
     },
     "luci": {
       "url": "https://github.com/immortalwrt/luci.git",
-      "commit": "ad75cde88e694b511100576bfbe0a280e5efe6ef"
+      "commit": "a6adca3c8f91ecc7c43dd04d3c23b252135c6c53"
     },
     "pon_drivers": {
       "url": "https://github.com/pbs05/openwrt-pon-drivers.git",
