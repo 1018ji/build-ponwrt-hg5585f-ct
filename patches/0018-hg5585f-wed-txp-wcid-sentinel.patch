@@ -1,0 +1,185 @@
+diff --git a/package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch b/package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch
+new file mode 100644
+--- /dev/null
++++ b/package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch
+@@ -0,0 +1,48 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: initialize the full Airoha WED AP WCID sentinel
++
++Airoha WED writes the low eight rept_wds_wcid bits from its PPE metadata.
++The generic buffer initializer left both WCID bytes zero, producing
++0x00ff for ordinary AP frames. mt76 expects the 10-bit sentinel 0x03ff.
++Initializing that field before publishing the buffers preserves its upper
++bits when WED writes the low byte. Hardware downlink otherwise binds and
++then stalls; the isolated downlink test works after only this field
++changes.
++Use an Airoha callback selected by its existing DT property.
++
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++diff --git a/mt7915/mmio.c b/mt7915/mmio.c
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -629,6 +629,19 @@
++ 
++ 	return ret;
++ }
+++static u32 mt7915_airoha_wed_init_buf(void *ptr, dma_addr_t phys, int token_id)
+++{
+++	struct mt76_connac_fw_txp *txp = ptr + MT_TXD_SIZE;
+++	u32 header = mt7915_wed_init_buf(ptr, phys, token_id);
+++
+++	/* Airoha fills the low eight WCID bits. Keep mt76's ordinary AP
+++	 * sentinel in the upper bits instead of selecting WCID 255.
+++	 */
+++	txp->rept_wds_wcid = cpu_to_le16(0x3ff);
+++
+++	return header;
+++}
+++
++ #endif
++ 
++ int mt7915_mmio_wed_init(struct mt7915_dev *dev, void *pdev_ptr,
++@@ -711,7 +724,9 @@
++ 		wed->wlan.rx_tbit[1] = 19;
++ 	}
++ 
++-	wed->wlan.init_buf = mt7915_wed_init_buf;
+++	wed->wlan.init_buf =
+++		of_property_present(dev->mt76.dev->of_node, "airoha,wed") ?
+++		mt7915_airoha_wed_init_buf : mt7915_wed_init_buf;
++ 	wed->wlan.offload_enable = mt76_wed_offload_enable;
++ 	wed->wlan.offload_disable = mt76_wed_offload_disable;
++ 	wed->wlan.init_rx_buf = mt76_wed_init_rx_buf;
+diff --git a/scripts/tests/test-wed-txp-template.py b/scripts/tests/test-wed-txp-template.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/tests/test-wed-txp-template.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""Execute real mt7915 WED initializers and check the ordinary AP sentinel."""
++import argparse
++import re
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    pos = text.index('u32 '+name+'(')
++    start = text.rfind('\n', 0, pos)+1
++    brace = text.index('{', pos)
++    end, depth = brace+1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76', type=Path, required=True)
++    args = parser.parse_args()
++    native = function((args.mt76/'mt7915/mac.c').read_text(), 'mt7915_wed_init_buf')
++    layout = re.search(r'struct mt76_connac_fw_txp \{.*?\} __packed __aligned\(4\);', (args.mt76/'mt76_connac.h').read_text(), re.S)[0]
++    mmio = (args.mt76/'mt7915/mmio.c').read_text()
++    airoha = function(mmio, 'mt7915_airoha_wed_init_buf')
++    # Exercise the actual selector too: generic WED keeps its initializer.
++    begin = mmio.index('\twed->wlan.init_buf =')
++    end = mmio.index(';', begin)+1
++    selector = mmio[begin:end]
++    source = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++typedef uint8_t u8;
++typedef uint32_t u32;
++typedef uint64_t dma_addr_t;
++typedef uint16_t __le16;
++typedef uint32_t __le32;
++#define MT_TXD_SIZE 32
++#define MT_TXD0_TX_BYTES 0xffffU
++#define MT_TXD0_PKT_FMT (3U << 23)
++#define MT_TX_TYPE_CT 0
++#define MT_TXD1_LONG_FORMAT (1U << 31)
++#define MT_TXD1_HDR_FORMAT (3U << 16)
++#define MT_HDR_FORMAT_802_3 0
++#define FIELD_PREP(mask,value) (((value) << __builtin_ctz(mask)) & (mask))
++#define cpu_to_le16(v) ((uint16_t)(v))
++#define cpu_to_le32(v) ((uint32_t)(v))
++#define MT_TXP_MAX_BUF_NUM 6
++#define __packed __attribute__((packed))
++#define __aligned(x) __attribute__((aligned(x)))
++'''+layout+r'''
++'''+native+'\n'+airoha+r'''
++static bool of_property_present(void *node, const char *property)
++{ assert(!strcmp(property, "airoha,wed")); return !!node; }
++struct fake_dev { struct { struct { void *of_node; } *dev; } mt76; };
++struct fake_wed { struct {u32 (*init_buf)(void *, dma_addr_t, int);} wlan; };
++static void select_buf(struct fake_dev *dev, struct fake_wed *wed)
++{
++'''+selector+r'''
++}
++int main(void)
++{
++    _Static_assert(sizeof(struct mt76_connac_fw_txp)==44, "TXP stride");
++    _Static_assert(offsetof(struct mt76_connac_fw_txp,rept_wds_wcid)==5, "sentinel offset");
++    const int tokens[] = {0,4095,4096,8191};
++    for (unsigned int i=0;i<sizeof(tokens)/sizeof(tokens[0]);i++) {
++        unsigned char regular[128], fixed[128];
++        memset(regular,0xa5,sizeof(regular));memset(fixed,0xa5,sizeof(fixed));
++        assert(mt7915_wed_init_buf(regular,0x90001000,tokens[i])==76);
++        assert(mt7915_airoha_wed_init_buf(fixed,0x90001000,tokens[i])==76);
++        struct mt76_connac_fw_txp *txp=(void *)(fixed+MT_TXD_SIZE);
++        assert(txp->rept_wds_wcid==0x3ff);
++        assert(txp->token==tokens[i] && txp->nbuf==1 && txp->buf[0]==0x9000104c);
++        assert(((struct mt76_connac_fw_txp *)(regular+MT_TXD_SIZE))->rept_wds_wcid==0);
++        for(unsigned int byte=0;byte<sizeof(fixed);byte++)
++            if(byte!=37 && byte!=38) assert(fixed[byte]==regular[byte]);
++        /* Hardware supplies the low eight WCID bits; the upper bits survive. */
++        fixed[37]=0xff;fixed[36]=1;
++        assert(txp->rept_wds_wcid==0x3ff && txp->bss_idx==1);
++    }
++    struct {void *of_node;} device={0};
++    struct fake_dev dev={0};struct fake_wed wed={0};
++    dev.mt76.dev=(void *)&device;
++    select_buf(&dev,&wed);assert(wed.wlan.init_buf==mt7915_wed_init_buf);
++    device.of_node=&device;
++    select_buf(&dev,&wed);assert(wed.wlan.init_buf==mt7915_airoha_wed_init_buf);
++    return 0;
++}
++'''
++    with tempfile.TemporaryDirectory() as temporary:
++        path, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        path.write_text(source)
++        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror',str(path),'-o',str(binary)],check=True)
++        subprocess.run([str(binary)],check=True)
++    print('PASS: real Airoha TXP initializer preserves 0x3ff across WCID rewrite, boundary tokens and DMA layout; generic WED selection preserved')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+--- a/scripts/tests/test-workflow-paths.py
++++ b/scripts/tests/test-workflow-paths.py
+@@ -113,6 +113,7 @@
+         self.write(Path('recipe/scripts/tests/test-ap-flowtable.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-wed-txp-template.py'), stub)
+         self.write(Path('scripts/validate-build.sh'), full_validation())
+ 
+     def write(self, path, contents=''):
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+--- a/scripts/validate-build.sh
++++ b/scripts/validate-build.sh
+@@ -48,6 +48,7 @@
+     python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
+     python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
+     python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
++    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-txp-template.py" --mt76 "$mt76"
+     mt76_found=$((mt76_found + 1))
+   done
+   [ "$mt76_found" -gt 0 ] || {

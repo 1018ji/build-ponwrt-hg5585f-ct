@@ -48,6 +48,7 @@ for kernel_config in "${kernel_configs[@]}"; do
     python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
     python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
     python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
+    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-txp-template.py" --mt76 "$mt76"
     mt76_found=$((mt76_found + 1))
   done
   [ "$mt76_found" -gt 0 ] || {

@@ -15,3 +15,5 @@
 0015-hg5585f-npu-input-ring-768.patch
 0016-hg5585f-wifi-flowtable-diagnostics.patch
 0017-hg5585f-bridge-wifi-forward-path.patch
+0018-hg5585f-wed-txp-wcid-sentinel.patch
+0019-hg5585f-wed-irq-progress-and-quarantine.patch

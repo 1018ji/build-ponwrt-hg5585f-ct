@@ -70,6 +70,14 @@
     {
       "name": "0017-hg5585f-bridge-wifi-forward-path.patch",
       "sha256": "9379acf7646596dde3ebcea1abd6decbe36f1bef408056064529e59e036b9688"
+    },
+    {
+      "name": "0018-hg5585f-wed-txp-wcid-sentinel.patch",
+      "sha256": "6410ec2fb95ed8eee710c990933e62ab0b7adab7068cec111357f508a23fe5c9"
+    },
+    {
+      "name": "0019-hg5585f-wed-irq-progress-and-quarantine.patch",
+      "sha256": "5fa0bbfe1f79e192cc89073d0bb251939827630fd92dd1fc49f25a1bd83ccd9c"
     }
   ],
   "files": {
@@ -197,7 +205,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "5705a07fab966dfd4a02bec1da23a59cceb41fd59dc7e1e4f5d57ee3edcaecfa",
+      "sha256": "5be56a7badb236a6d7d738a435af225433a454b805789a9be3f4adebee5481aa",
       "executable": false
     },
     "scripts/check-hg5585f-rom-abi.py": {
@@ -306,11 +314,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "32d15706d5d8ca2e43b4bb833b60a8cfcc8ce68918fe944b633568326be2dba2",
+      "sha256": "9750d57ea7dcb51b9f599b99ecde7f236d66e27a0ce183fabc091ad0e21dec9e",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "16314ba85628a438ff2464f5d599b2d3c38b5771957f1ab1a649a6a627dac413",
+      "sha256": "08948786ba081fbb74c46a7f02f41e064f14f4c29f1d48588f2a56aa8c3f5721",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -318,8 +326,8 @@
       "sha256": "c3d78fc6f5767569f35db41b47e74b5426512a75bd6269856e892e47b38926df"
     },
     "scripts/tests/test-wed-irq-storm.py": {
-      "executable": false,
-      "sha256": "ffed8a9d4b1ba3893e92ae1a880234b930def8abef8f57f8a7cb45d971244176"
+      "sha256": "15b928cfc5dfdb600db8930820128b6e2be9dc1b9d4b1dcf8453283485994090",
+      "executable": false
     },
     "target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch": {
       "sha256": "c4f5abc3bb90c8867e71c8420fc09a3dc3d13483d1cc22d6823b140979b6a623",
@@ -411,6 +419,18 @@
     },
     "target/linux/airoha/patches-6.18/948-netfilter-flowtable-use-wifi-bridge-endpoint.patch": {
       "sha256": "cceba1f6c0280327a5a1ed7d00d3473d32ed59b0d381d26641e610ee3c1c95f9",
+      "executable": false
+    },
+    "scripts/tests/test-wed-txp-template.py": {
+      "sha256": "28030ce2777d6c141bc26a40949323eb20eb27b2f4c8acb2ef487dc2a71e6978",
+      "executable": false
+    },
+    "package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch": {
+      "sha256": "54a66866856b51cb1f7f1aab3c0e26d9b21551f924ab37b7298568972728f219",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/949-net-airoha-classify-wed-irqs-and-drain-faults.patch": {
+      "sha256": "cb185b1a6b12f1d15710875d08cc4b05c08521670a3628942ab3ff737b738785",
       "executable": false
     }
   },
