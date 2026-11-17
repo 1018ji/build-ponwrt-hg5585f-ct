@@ -13,7 +13,7 @@
     },
     {
       "name": "0003-hg5585f-firmware-and-validation.patch",
-      "sha256": "3297f46e9ad5a35b2b86edc41bf3588549e8fb4375bd25c4e342bc746775d3bb"
+      "sha256": "e943c343d8e3a9e7fbd0feefe37b7cc2d1258452ffb2ad8fa99fbe9d53f4e093"
     },
     {
       "name": "0005-hg5585f-build-profile.patch",
@@ -241,7 +241,7 @@
       "executable": false
     },
     "scripts/check-hg5585f-ppe-accounting.py": {
-      "sha256": "f0636ef8e787896066c52a93e4653dcd1f7a24c960b5ffe8033872832dab4fd1",
+      "sha256": "ed61c4328a65c77c1b203e1e49c74210ae94072e8a8ee98550d95930a0d64ef0",
       "executable": false
     },
     "scripts/tests/hg5585f-rom-rx.json": {

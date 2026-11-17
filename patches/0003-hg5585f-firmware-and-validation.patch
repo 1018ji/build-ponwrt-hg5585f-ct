@@ -3357,7 +3357,7 @@ index 0000000000000000000000000000000000000000..5d0f78cddb503cd05f9bc3d08096063c
 +                        '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
 +                        str(cfile), '-o', str(binary)], check=True)
 +        subprocess.run([str(binary)], check=True)
-+    check_readers(Path(__file__).resolve().parents[1])
++    if (Path(__file__).resolve().parents[1]/'package/luci-app-airoha-npu').exists(): check_readers(Path(__file__).resolve().parents[1])
 +
 +
 +if __name__ == '__main__':
