@@ -212,8 +212,8 @@ new file mode 100644
 +    wed.txfree_ring=(struct mtk_wed_ring){.desc=descriptors,.desc_phys=0x88000000,.desc_size=16,.size=4,.wpdma=native};
 +    regs[MTK_WED_RING_RX(1)/4]=0x88000000;regs[(MTK_WED_RING_RX(1)+4)/4]=4;
 +    put16(data+2,1);put32(data+4,4U<<16);put32(data+8,4096|(0x7fffU<<15));
-+    put16(page+34,4096);page[39]=1;put32(page+40,0x9000004c);put16(page+64,54);
-+    page[76]=0xea;
++    put16(page+34,4096);page[39]=1;put32(page+40,0x90000080);put16(page+64,54);
++    page[128]=0xea;
 +    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
 +    assert(diag->state.notifications==1 && !writes);
 +    regs[MTK_WED_WDMA_RX_PROCESSED_MIB(1)/4]=123;
@@ -442,10 +442,10 @@ new file mode 100644
 ++	record->nbuf = bytes[39];
 ++	record->payload_ptr = get_unaligned_le32(bytes + 40);
 ++	record->length = get_unaligned_le16(bytes + 64);
-++	expected = record->dma + 76;
+++	expected = record->dma + 128;
 ++	if (record->payload_ptr == expected && record->length <= EN7581_WED_PAYLOAD_SIZE) {
 ++		for (i = 0; i < min_t(unsigned int, record->length, sizeof(record->payload)); i++)
-++			record->payload[i] = READ_ONCE(bytes[76 + i]);
+++			record->payload[i] = READ_ONCE(bytes[128 + i]);
 ++		record->payload_valid = true;
 ++	}
 ++	record->valid = true;

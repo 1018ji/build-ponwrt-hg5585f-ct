@@ -131,8 +131,8 @@ static void capture_tests(void)
     wed.txfree_ring=(struct mtk_wed_ring){.desc=descriptors,.desc_phys=0x88000000,.desc_size=16,.size=4,.wpdma=native};
     regs[MTK_WED_RING_RX(1)/4]=0x88000000;regs[(MTK_WED_RING_RX(1)+4)/4]=4;
     put16(data+2,1);put32(data+4,4U<<16);put32(data+8,4096|(0x7fffU<<15));
-    put16(page+34,4096);page[39]=1;put32(page+40,0x9000004c);put16(page+64,54);
-    page[76]=0xea;
+    put16(page+34,4096);page[39]=1;put32(page+40,0x90000080);put16(page+64,54);
+    page[128]=0xea;
     airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
     assert(diag->state.notifications==1 && !writes);
     regs[MTK_WED_WDMA_RX_PROCESSED_MIB(1)/4]=123;

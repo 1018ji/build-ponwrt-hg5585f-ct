@@ -73,13 +73,13 @@ int main(void)
         unsigned char regular[128], fixed[128];
         memset(regular,0xa5,sizeof(regular));memset(fixed,0xa5,sizeof(fixed));
         assert(mt7915_wed_init_buf(regular,0x90001000,tokens[i])==76);
-        assert(mt7915_airoha_wed_init_buf(fixed,0x90001000,tokens[i])==76);
+        assert(mt7915_airoha_wed_init_buf(fixed,0x90001000,tokens[i])==128);
         struct mt76_connac_fw_txp *txp=(void *)(fixed+MT_TXD_SIZE);
         assert(txp->rept_wds_wcid==0x3ff);
-        assert(txp->token==tokens[i] && txp->nbuf==1 && txp->buf[0]==0x9000104c);
+        assert(txp->token==tokens[i] && txp->nbuf==1 && txp->buf[0]==0x90001080);
         assert(((struct mt76_connac_fw_txp *)(regular+MT_TXD_SIZE))->rept_wds_wcid==0);
         for(unsigned int byte=0;byte<sizeof(fixed);byte++)
-            if(byte!=37 && byte!=38) assert(fixed[byte]==regular[byte]);
+            if((byte<36 || (byte>=44 && byte<76))) assert(fixed[byte]==regular[byte]);
         /* Hardware supplies the low eight WCID bits; the upper bits survive. */
         fixed[37]=0xff;fixed[36]=1;
         assert(txp->rept_wds_wcid==0x3ff && txp->bss_idx==1);
