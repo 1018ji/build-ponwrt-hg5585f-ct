@@ -62,6 +62,10 @@
     {
       "name": "0015-hg5585f-npu-input-ring-768.patch",
       "sha256": "5fb3d5d8be1d14b5c2fa527752538c5e43f781b412497a6b59ce0bd71900375f"
+    },
+    {
+      "name": "0016-hg5585f-wifi-flowtable-diagnostics.patch",
+      "sha256": "ae8d313a089465e97ecca7b6ef4aa6ccb2bdd9388e79a9b503624953180eabcf"
     }
   ],
   "files": {
@@ -181,7 +185,7 @@
       "executable": false
     },
     "files/usr/sbin/hg5585f-wifi-offload-check": {
-      "sha256": "2cd951c9bd3269081bc2c0f1dd256874b3c58a30b3099b7906aa0dda22729822",
+      "sha256": "05b38a5ebf9ffc61b8d20c62f09a5a40fa35b2c8eb6f2b560d1740f148ba129e",
       "executable": true
     },
     "scripts/check-hg5585f-images.py": {
@@ -189,9 +193,8 @@
       "executable": false
     },
     "scripts/check-hg5585f-offload.py": {
-      "sha256": "5d3d4c03bac4a72348d7268ee200504323f62f844c6c227cf33b374e6d428865",
-      "executable": false,
-      "reviewed": true
+      "sha256": "643ad9ff3ed2f84ddd826d13ae60b27d3f0a20fd95afa64bf5dbefdf6b3e04e5",
+      "executable": false
     },
     "scripts/check-hg5585f-rom-abi.py": {
       "sha256": "c603e203817bccf1307a3fadec45cbb92019b03d4c5353fd7f86b4c44390eab8",
@@ -299,11 +302,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "7f70e58d55c75f5756dbd652bc61e59dc10c5f73c88071b4a4b1bf134b86fae4",
+      "sha256": "914e2e0ec11e6cc397cfcf0997362c95cfef2afa4a243d868eed47142250938f",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "e83855f3018b960472b501beb9545b2c210e463195580e1da2d6b8f49e0a070a",
+      "sha256": "5e97c3aad98c661fc8dc6fe2ae790ac42af4c2a1ea9889badf0f72849a5c9149",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -372,6 +375,30 @@
     },
     "target/linux/airoha/patches-6.18/945-net-airoha-match-hg5585f-npu-input-ring.patch": {
       "sha256": "c1c644fc5743109944f7b566ed80c8e3778520e06381621effc38700f63a32c1",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/947-net-airoha-wed-allow-multiple-flow-blocks.patch": {
+      "sha256": "1139b4f5c8ee4dd4e21a0b867ba4fa24e18b3a95c51994dee75c0e2fda38a518",
+      "executable": false
+    },
+    "target/linux/airoha/patches-6.18/946-net-airoha-ppe-flow-diagnostics.patch": {
+      "sha256": "46f582a9a9322cd9077734cca7a0a66f1298431a8c0c0e16543664470198d73a",
+      "executable": false
+    },
+    "target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload": {
+      "sha256": "a986e33f2415f80053925cbc557dbc42a11ead4bf6c5a7ca92d877134149c620",
+      "executable": false
+    },
+    "scripts/tests/test-ap-flowtable.py": {
+      "sha256": "e188e76d17fb7a24afa8f403832ab7ae7fd378fed1a5d690fd0a99cabb0a08d8",
+      "executable": false
+    },
+    "scripts/tests/test-wed-flow-blocks.py": {
+      "sha256": "f9d42a476a6cbeb3665ce21aaac04bb47fab0b7989e07dbd0c1a20f5cdec66df",
+      "executable": false
+    },
+    "scripts/tests/test-ppe-flow-setup.py": {
+      "sha256": "9fa77d08efb21824512af8a3ab69b5cccd4beeb780966b8fdad08708b580e8d4",
       "executable": false
     }
   },

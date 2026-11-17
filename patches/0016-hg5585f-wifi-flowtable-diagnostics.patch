@@ -1,0 +1,854 @@
+diff --git a/files/usr/sbin/hg5585f-wifi-offload-check b/files/usr/sbin/hg5585f-wifi-offload-check
+--- a/files/usr/sbin/hg5585f-wifi-offload-check
++++ b/files/usr/sbin/hg5585f-wifi-offload-check
+@@ -21,6 +21,21 @@
+ 	exit 1
+ }
+ report=$(mktemp -d /tmp/hg5585f-wifi-offload.XXXXXX)
++snapshot() {
++	label=$1
++	cat /proc/uptime > "$report/$label.uptime"
++	cat /proc/stat > "$report/$label.cpu"
++	cat /proc/softirqs > "$report/$label.softirqs"
++	cat /proc/net/dev > "$report/$label.netdev"
++	if [ -r /sys/kernel/debug/ppe/flow_setup ]; then
++		cat /sys/kernel/debug/ppe/flow_setup > "$report/$label.flow_setup"
++	fi
++	# Save BND entries during traffic too; entries can age after iperf exits.
++	awk '$2 == "BND" { print }' /sys/kernel/debug/ppe/entries > "$report/$label.ppe-bound" 2>/dev/null || true
++}
++snapshot start
++nft list table bridge fw4 > "$report/bridge-flowtable" 2>&1 || true
++nft list flowtable inet fw4 ft > "$report/inet-flowtable" 2>&1 || true
+ [ ! -r "$accounting" ] || cat "$accounting" > "$report/accounting-before"
+ [ ! -r "$status" ] || cat "$status" > "$report/before"
+ if [ -n "$npu_status" ]; then
+@@ -34,7 +49,16 @@
+ 	iw dev "$interface" station dump > "$report/$interface.stations" 2>&1 || true
+ done
+ echo "During this $period second sample, send traffic in both directions between wired and Wi-Fi clients."
+-sleep "$period"
++remaining=$period
++sample=0
++while [ "$remaining" -gt 0 ]; do
++	interval=5
++	[ "$remaining" -ge "$interval" ] || interval=$remaining
++	sleep "$interval"
++	sample=$((sample + 1))
++	snapshot "sample-$sample"
++	remaining=$((remaining - interval))
++done
+ [ ! -r "$accounting" ] || cat "$accounting" > "$report/accounting-after"
+ [ ! -r "$status" ] || cat "$status" > "$report/after"
+ if [ -n "$npu_status" ]; then
+@@ -116,4 +140,7 @@
+ 	echo "Use account_group in PPE entries to identify the corresponding group."
+ fi
+ echo "Correlate PPE BND entries and hardware counters with the test endpoints; configuration alone does not prove forwarding."
++if [ -r "$report/sample-$sample.flow_setup" ]; then
++	cat "$report/sample-$sample.flow_setup"
++fi
+ echo "Report: $report"
+diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
+--- a/scripts/check-hg5585f-offload.py
++++ b/scripts/check-hg5585f-offload.py
+@@ -20,6 +20,8 @@
+     '943-net-airoha-fix-npu-probe-reset-lifecycle.patch',
+     '944-net-airoha-ppe-clear-stale-enable.patch',
+     '945-net-airoha-match-hg5585f-npu-input-ring.patch',
++    '946-net-airoha-ppe-flow-diagnostics.patch',
++    '947-net-airoha-wed-allow-multiple-flow-blocks.patch',
+ )]
+ patches += sorted((root / 'package/kernel/mt76/patches').glob('*.patch'))
+ for patch in patches:
+diff --git a/scripts/tests/test-ap-flowtable.py b/scripts/tests/test-ap-flowtable.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/tests/test-ap-flowtable.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++"""Execute the hotplug worker with delayed bridge membership and reload failures."""
++import argparse
++import os
++import sys
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++parser = argparse.ArgumentParser()
++parser.add_argument('--hotplug', type=Path, required=True)
++args, tests = parser.parse_known_args()
++SCRIPT = args.hotplug
++sys.argv = [sys.argv[0]] + tests
++
++
++class HotplugTests(unittest.TestCase):
++    def run_worker(self, *, ready_at=4, reload_failures=0, present=True,
++                   already=False, enabled=True, device='phy1-ap0'):
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            bindir = root/'bin'
++            bindir.mkdir()
++            (root/'locks').mkdir()
++            if present:
++                (root/'net'/device).mkdir(parents=True)
++            for name, code in {
++                'flock': 'exit 0',
++                'uci': 'echo '+('1' if enabled else '0'),
++                'logger': 'echo timeout >> "$TEST_ROOT/events"',
++                'sleep': '''n=$(cat "$TEST_ROOT/ticks" 2>/dev/null || echo 0)
++n=$((n+1))
++echo "$n" > "$TEST_ROOT/ticks"
++if [ "$n" -ge "$READY_AT" ] && [ -d "$TEST_ROOT/net/$DEVICENAME" ]; then
++ mkdir -p "$TEST_ROOT/net/$DEVICENAME/brport"
++fi''',
++                'nft': '''if [ -f "$TEST_ROOT/loaded" ]; then
++ echo 'devices = { "'$DEVICENAME'" };'
++fi''',
++                'firewall': '''n=$(cat "$TEST_ROOT/reloads" 2>/dev/null || echo 0)
++n=$((n+1))
++echo "$n" > "$TEST_ROOT/reloads"
++[ "$n" -gt "$FAILURES" ] || exit 1
++touch "$TEST_ROOT/loaded"''',
++            }.items():
++                p = bindir/name
++                p.write_text('#!/bin/sh\n'+code+'\n')
++                p.chmod(0o755)
++            if already:
++                (root/'loaded').touch()
++            text = SCRIPT.read_text().replace('/sys/class/net', str(root/'net'))
++            text = text.replace('/var/lock', str(root/'locks'))
++            text = text.replace('/etc/init.d/firewall', str(bindir/'firewall'))
++            text = text.replace(') </dev/null >/dev/null 2>&1 &', ')')
++            worker = root/'worker'
++            worker.write_text(text)
++            env = dict(os.environ, PATH=str(bindir)+':'+os.environ['PATH'],
++                       TEST_ROOT=str(root), DEVICENAME=device, ACTION='add',
++                       READY_AT=str(ready_at), FAILURES=str(reload_failures))
++            subprocess.run(['sh', str(worker)], env=env, check=True, timeout=5)
++            return {name: (root/name).read_text() if (root/name).exists() else ''
++                    for name in ('ticks', 'reloads', 'events')}
++
++    def test_late_bridge_membership(self):
++        state = self.run_worker(ready_at=4)
++        self.assertEqual(state['reloads'], '1\n')
++        self.assertGreaterEqual(int(state['ticks']), 5)
++
++    def test_reload_failure_is_retried(self):
++        self.assertEqual(self.run_worker(reload_failures=1)['reloads'], '2\n')
++
++    def test_existing_tables_need_no_reload(self):
++        self.assertEqual(self.run_worker(already=True)['reloads'], '')
++
++    def test_disappearing_interface_stops_worker(self):
++        state = self.run_worker(present=False)
++        self.assertEqual(state['ticks'], '1\n')
++        self.assertEqual(state['reloads'], '')
++
++    def test_disabled_offload(self):
++        self.assertEqual(self.run_worker(enabled=False)['reloads'], '')
++
++    def test_missing_bridge_wait_is_bounded(self):
++        state = self.run_worker(ready_at=100)
++        self.assertEqual(state['ticks'], '30\n')
++        self.assertEqual(state['reloads'], '')
++        self.assertEqual(state['events'], 'timeout\n')
++
++    def test_non_ap_event_is_ignored(self):
++        self.assertEqual(self.run_worker(device='lan3')['ticks'], '')
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/scripts/tests/test-ppe-flow-setup.py b/scripts/tests/test-ppe-flow-setup.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/tests/test-ppe-flow-setup.py
+@@ -0,0 +1,97 @@
++#!/usr/bin/env python3
++"""Execute the real diagnostic wrapper and verify driver errors propagate."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    start = text.index('static int '+name+'(')
++    brace = text.index('{', start)
++    depth = 1
++    end = brace + 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--kernel', type=Path, required=True)
++    args = parser.parse_args()
++    driver = args.kernel/'drivers/net/ethernet/airoha'
++    header = (driver/'airoha_eth.h').read_text()
++    stages = re.search(r'enum airoha_ppe_flow_stage \{.*?\n\};', header, re.S)[0]
++    diag = re.search(r'struct airoha_ppe_flow_diag \{.*?\n\};', header, re.S)[0]
++    wrapper = function((driver/'airoha_ppe.c').read_text(),
++                       'airoha_ppe_flow_offload_replace')
++    c = '''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <errno.h>
++typedef uint64_t u64;
++typedef uint16_t u16;
++typedef long long atomic64_t;
++#define IFNAMSIZ 16
++#define lockdep_assert_held(x) ((void)0)
++'''+stages+'\n'+diag+'''
++struct airoha_ppe { struct airoha_ppe_flow_diag flow_diag; };
++struct airoha_eth { struct airoha_ppe *ppe; };
++struct flow_cls_offload { int unused; };
++static int result, reject_stage;
++static int __airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
++                                            struct flow_cls_offload *f)
++{
++    (void)f;
++    eth->ppe->flow_diag.last_stage = reject_stage;
++    return result;
++}
++'''+wrapper+'''
++int main(void)
++{
++    struct airoha_ppe ppe = {0};
++    struct airoha_eth eth = { .ppe = &ppe };
++    struct flow_cls_offload flow = {0};
++    const int errors[] = {-EOPNOTSUPP, -EINVAL, -ENOMEM, -EBUSY};
++    unsigned int calls = 0;
++    for (int stage = 0; stage < AIROHA_FLOW_COMPLETE; stage++) {
++        reject_stage = stage;
++        for (unsigned int e = 0; e < sizeof(errors)/sizeof(errors[0]); e++) {
++            result = errors[e];
++            ppe.flow_diag.last_egress[0] = 'x';
++            ppe.flow_diag.wdma_wed = true;
++            ppe.flow_diag.wdma_wcid = 42;
++            assert(airoha_ppe_flow_offload_replace(&eth, &flow) == result);
++            calls++;
++            assert(ppe.flow_diag.errors[stage] == e + 1);
++            assert(ppe.flow_diag.last_error == result);
++            assert(ppe.flow_diag.replace_success == 0);
++            assert(ppe.flow_diag.last_egress[0] == 0);
++            assert(!ppe.flow_diag.wdma_wed && !ppe.flow_diag.wdma_wcid);
++        }
++    }
++    result = 0;
++    reject_stage = AIROHA_FLOW_INSERT;
++    assert(!airoha_ppe_flow_offload_replace(&eth, &flow));
++    assert(ppe.flow_diag.replace_calls == calls + 1);
++    assert(ppe.flow_diag.replace_success == 1);
++    assert(ppe.flow_diag.last_stage == AIROHA_FLOW_COMPLETE);
++    assert(!ppe.flow_diag.last_error);
++    return 0;
++}
++'''
++    with tempfile.TemporaryDirectory() as temp:
++        source, binary = Path(temp)/'test.c', Path(temp)/'test'
++        source.write_text(c)
++        subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                        str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++    print('PASS: real PPE diagnostic wrapper preserves errors at every setup stage and resets stale context')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-wed-flow-blocks.py b/scripts/tests/test-wed-flow-blocks.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/tests/test-wed-flow-blocks.py
+@@ -0,0 +1,138 @@
++#!/usr/bin/env python3
++"""Execute WED block binding through simultaneous flowtables and reloads."""
++import argparse
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--kernel', type=Path, required=True)
++    args = parser.parse_args()
++    source = (args.kernel/'drivers/net/ethernet/airoha/airoha_wed.c').read_text()
++    start = source.index('static int airoha_wed_setup_tc(')
++    end = source.index('\nstatic void airoha_wed_ppe_check', start)
++    function = source[start:end]
++    common = r'''
++#include <assert.h>
++#include <stddef.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <errno.h>
++enum tc_setup_type { TC_SETUP_BLOCK, TC_SETUP_FT, TC_OTHER };
++enum { FLOW_BLOCK_BIND, FLOW_BLOCK_UNBIND, FLOW_UNKNOWN };
++enum { FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS, EGRESS };
++struct list_head { int unused; };
++struct net_device { int id; };
++struct mtk_wed_device { int id; };
++struct flow_block_offload {
++    int command, binder_type;
++    void *block;
++    struct list_head *driver_block_list;
++};
++struct flow_block_cb {
++    bool allocated, active;
++    void *block, *ident, *priv;
++    unsigned int refs;
++    struct list_head driver_list;
++};
++typedef int flow_setup_cb_t(enum tc_setup_type, void *, void *);
++static struct flow_block_cb pool[32];
++static int allocations, fail_alloc;
++#define LIST_HEAD(x) struct list_head x = {0}
++#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
++#define PTR_ERR(p) ((int)(intptr_t)(p))
++static int airoha_wed_setup_cb(enum tc_setup_type t, void *data, void *priv)
++{ (void)t; (void)data; (void)priv; return 0; }
++static struct flow_block_cb *flow_block_cb_lookup(void *block,
++                                               flow_setup_cb_t *cb, void *ident)
++{
++    (void)cb;
++    for (int i = 0; i < 32; i++)
++        if (pool[i].active && pool[i].block == block && pool[i].ident == ident)
++            return &pool[i];
++    return 0;
++}
++static struct flow_block_cb *flow_block_cb_alloc(flow_setup_cb_t *cb, void *ident,
++                                                void *priv, void *release)
++{
++    (void)cb; (void)release;
++    if (fail_alloc) return (void *)(intptr_t)-ENOMEM;
++    for (int i = 0; i < 32; i++) if (!pool[i].allocated) {
++        pool[i] = (struct flow_block_cb){.allocated=true, .ident=ident, .priv=priv};
++        allocations++;
++        return &pool[i];
++    }
++    assert(0); return 0;
++}
++static void flow_block_cb_incref(struct flow_block_cb *cb) { cb->refs++; }
++static int flow_block_cb_decref(struct flow_block_cb *cb)
++{ assert(cb->refs); return --cb->refs; }
++static void flow_block_cb_add(struct flow_block_cb *cb, struct flow_block_offload *f)
++{ cb->active = true; cb->block = f->block; }
++static void flow_block_cb_remove(struct flow_block_cb *cb, struct flow_block_offload *f)
++{ assert(cb->block == f->block); cb->active = false; cb->allocated = false; }
++static void list_add_tail(struct list_head *n, struct list_head *h) { (void)n; (void)h; }
++static void list_del(struct list_head *n) { (void)n; }
++'''
++    test = r'''
++int main(void)
++{
++    int inet, bridge, replacement, unknown;
++    struct net_device ap0 = {0}, ap1 = {1};
++    struct mtk_wed_device wed = {1};
++    struct flow_block_offload f = {.command=FLOW_BLOCK_BIND,
++        .binder_type=FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS, .block=&inet};
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    assert(allocations == 1);
++    assert(flow_block_cb_lookup(&inet, airoha_wed_setup_cb, &ap0)->priv == &wed);
++    f.block = &bridge;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    assert(allocations == 2); /* both tables can bind one AP */
++    assert(!airoha_wed_setup_tc(&wed, &ap1, TC_SETUP_FT, &f));
++    assert(allocations == 3); /* same block, second AP */
++    f.block = &inet;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    assert(allocations == 3); /* shared binding increments its reference */
++    f.command = FLOW_BLOCK_UNBIND;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    assert(flow_block_cb_lookup(&inet, airoha_wed_setup_cb, &ap0)->refs == 1);
++    f.block = &replacement; f.command = FLOW_BLOCK_BIND;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    f.block = &inet; f.command = FLOW_BLOCK_UNBIND;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    assert(!flow_block_cb_lookup(&inet, airoha_wed_setup_cb, &ap0));
++    assert(flow_block_cb_lookup(&bridge, airoha_wed_setup_cb, &ap0));
++    assert(flow_block_cb_lookup(&replacement, airoha_wed_setup_cb, &ap0));
++    f.block = &unknown;
++    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -ENOENT);
++    f.command = FLOW_BLOCK_BIND; f.binder_type = EGRESS;
++    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -EOPNOTSUPP);
++    f.binder_type = FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS;
++    fail_alloc = 1;
++    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -ENOMEM);
++    fail_alloc = 0;
++    assert(airoha_wed_setup_tc(&wed, &ap0, TC_OTHER, &f) == -EOPNOTSUPP);
++    f.command = FLOW_UNKNOWN;
++    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -EOPNOTSUPP);
++    f.command = FLOW_BLOCK_UNBIND; f.block = &bridge;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    assert(!airoha_wed_setup_tc(&wed, &ap1, TC_SETUP_FT, &f));
++    f.block = &replacement;
++    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
++    for (int i = 0; i < 32; i++) assert(!pool[i].active && !pool[i].allocated);
++    return 0;
++}
++'''
++    with tempfile.TemporaryDirectory() as directory:
++        source, binary = Path(directory)/'test.c', Path(directory)/'test'
++        source.write_text(common+function+test)
++        subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                        str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++    print('PASS: real WED setup supports inet+bridge, two APs, overlapping reload, reference cleanup and allocation failure')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+--- a/scripts/tests/test-workflow-paths.py
++++ b/scripts/tests/test-workflow-paths.py
+@@ -107,6 +107,9 @@
+         self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
+         self.write(Path('recipe/scripts/tests/test-wed-irq-storm.py'), stub)
+         self.write(Path('recipe/scripts/tests/test-npu-lifecycle.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-ppe-flow-setup.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-wed-flow-blocks.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-ap-flowtable.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)
+         self.write(Path('scripts/validate-build.sh'), full_validation())
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+--- a/scripts/validate-build.sh
++++ b/scripts/validate-build.sh
+@@ -28,6 +28,9 @@
+   python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
+   python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-irq-storm.py" --kernel "$kernel"
+   python3 "$GITHUB_WORKSPACE/scripts/tests/test-npu-lifecycle.py" --kernel "$kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/test-ppe-flow-setup.py" --kernel "$kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-flow-blocks.py" --kernel "$kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/test-ap-flowtable.py" --hotplug target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload
+   python3 "$GITHUB_WORKSPACE/scripts/tests/check-hg5585f-ppe-host-start.py" --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe.c"
+   python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
+   mt76_found=0
+diff --git a/target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload b/target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload
+--- a/target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload
++++ b/target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload
+@@ -2,18 +2,35 @@
+ 
+ [ "$ACTION" = "add" ] || exit 0
+ 
+-case "${DEVICENAME}" in
++case "$DEVICENAME" in
+ 	phy*-ap*|ap-mld*) ;;
+ 	*) exit 0 ;;
+ esac
+ 
+-nft list flowtable bridge fw4 fb 2>/dev/null | grep -qw "\"${DEVICENAME}\"" && exit 0
++# A netdev add event precedes netifd attaching the AP to its bridge.
++# Each AP gets a worker so a later radio is not lost behind another lock.
++(
++	exec 9>"/var/lock/fw4-bridge-reload.$DEVICENAME.lock"
++	flock -n 9 || exit 0
+ 
+-(
+-	exec 9>/var/lock/fw4-bridge-reload.lock
+-	flock -n 9 || exit 0
+-	sleep 2
+-	/etc/init.d/firewall reload >/dev/null 2>&1
+-) &
++	for attempt in $(seq 1 30); do
++		sleep 2
++		[ -d "/sys/class/net/$DEVICENAME" ] || exit 0
++		[ -d "/sys/class/net/$DEVICENAME/brport" ] || continue
++		[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] || exit 0
++
++		inet_table=$(nft list flowtable inet fw4 ft 2>/dev/null)
++		bridge_table=$(nft list flowtable bridge fw4 fb 2>/dev/null)
++		if printf '%s\n' "$inet_table" | grep -Fq "\"$DEVICENAME\"" &&
++		   printf '%s\n' "$bridge_table" | grep -Fq "\"$DEVICENAME\""; then
++			exit 0
++		fi
++
++		# fw4 serializes reloads; recheck on the next iteration, including
++		# failures while another interface or the firewall is starting.
++		/etc/init.d/firewall reload >/dev/null 2>&1
++	done
++	logger -t fw4 "AP $DEVICENAME missing from flowtables after bridge setup"
++) </dev/null >/dev/null 2>&1 &
+ 
+ exit 0
+diff --git a/target/linux/airoha/patches-6.18/946-net-airoha-ppe-flow-diagnostics.patch b/target/linux/airoha/patches-6.18/946-net-airoha-ppe-flow-diagnostics.patch
+new file mode 100644
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/946-net-airoha-ppe-flow-diagnostics.patch
+@@ -0,0 +1,298 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: expose flow setup stages and hardware commit errors
++
++Expose read-only diagnostics for flowtable replace results, WDMA forward
++path resolution, and actual FOE commits. Software rule acceptance alone
++does not demonstrate hardware binding. Keep the existing forwarding and
++error handling behavior, with no additional hardware accesses.
++
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++diff --git a/drivers/net/ethernet/airoha/airoha_eth.h b/drivers/net/ethernet/airoha/airoha_eth.h
++--- a/drivers/net/ethernet/airoha/airoha_eth.h
+++++ b/drivers/net/ethernet/airoha/airoha_eth.h
++@@ -726,6 +726,38 @@
++ #define AIROHA_RXD4_PPE_CPU_REASON	GENMASK(20, 16)
++ #define AIROHA_RXD4_FOE_ENTRY		GENMASK(15, 0)
++ 
+++enum airoha_ppe_flow_stage {
+++	AIROHA_FLOW_PARSE,
+++	AIROHA_FLOW_ACTIONS,
+++	AIROHA_FLOW_MAC,
+++	AIROHA_FLOW_PREPARE,
+++	AIROHA_FLOW_PORTS,
+++	AIROHA_FLOW_MANGLE,
+++	AIROHA_FLOW_TUPLE,
+++	AIROHA_FLOW_ALLOCATE,
+++	AIROHA_FLOW_COMMIT,
+++	AIROHA_FLOW_INSERT,
+++	AIROHA_FLOW_COMPLETE,
+++	AIROHA_FLOW_STAGE_COUNT
+++};
+++
+++/* Flow setup runs under flow_offload_mutex; hardware binds may run in NAPI. */
+++struct airoha_ppe_flow_diag {
+++	u64 replace_calls;
+++	u64 replace_success;
+++	u64 errors[AIROHA_FLOW_STAGE_COUNT];
+++	int last_stage;
+++	int last_error;
+++	int last_action;
+++	u16 last_addr_type;
+++	char last_egress[IFNAMSIZ];
+++	int wdma_error;
+++	u16 wdma_idx, wdma_queue, wdma_bss, wdma_wcid, wdma_sta_id;
+++	bool wdma_wed;
+++	atomic64_t hw_commit_calls;
+++	atomic64_t hw_commit_errors;
+++};
+++
++ struct airoha_ppe {
++ 	bool wed_enabled;
++ 	bool host_managed;
++@@ -747,6 +779,7 @@
++ 	dma_addr_t foe_stats_dma;
++ 
++ 	struct dentry *debugfs_dir;
+++	struct airoha_ppe_flow_diag flow_diag;
++ };
++ 
++ struct airoha_eth_soc_data {
++diff --git a/drivers/net/ethernet/airoha/airoha_ppe.c b/drivers/net/ethernet/airoha/airoha_ppe.c
++--- a/drivers/net/ethernet/airoha/airoha_ppe.c
+++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
++@@ -696,7 +696,18 @@
++ 	if (netdev) {
++ 		struct airoha_wdma_info info = {};
++ 
++-		if (!airoha_ppe_get_wdma_info(netdev, data->eth.h_dest, &info)) {
+++		struct airoha_ppe_flow_diag *diag = &eth->ppe->flow_diag;
+++		int wdma_err;
+++
+++		wdma_err = airoha_ppe_get_wdma_info(netdev, data->eth.h_dest, &info);
+++		diag->wdma_error = wdma_err;
+++		diag->wdma_wed = info.wed;
+++		diag->wdma_idx = info.idx;
+++		diag->wdma_queue = info.queue;
+++		diag->wdma_bss = info.bss;
+++		diag->wdma_wcid = info.wcid;
+++		diag->wdma_sta_id = info.sta_id;
+++		if (!wdma_err) {
++ 			if (info.wed) {
++ 				if (netdev->mtu != ETH_DATA_LEN)
++ 					return -EOPNOTSUPP;
++@@ -1160,6 +1171,7 @@
++ 	struct airoha_npu *npu;
++ 	int err = 0;
++ 
+++	atomic64_inc(&ppe->flow_diag.hw_commit_calls);
++ 	memcpy(&hwe->d, &e->d, sizeof(*hwe) - sizeof(hwe->ib1));
++ 	wmb();
++ 
++@@ -1182,6 +1194,9 @@
++ 		err = airoha_ppe_foe_commit_sram_entry(ppe, hash);
++ unlock:
++ 	rcu_read_unlock();
+++
+++	if (err)
+++		atomic64_inc(&ppe->flow_diag.hw_commit_errors);
++ 
++ 	return err;
++ }
++@@ -1592,9 +1607,10 @@
++ 	return airoha_ppe_get_entry_idle_time(ppe, e->data.ib1);
++ }
++ 
++-static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
++-					   struct flow_cls_offload *f)
++-{
+++static int __airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+++					     struct flow_cls_offload *f)
+++{
+++	struct airoha_ppe_flow_diag *diag = &eth->ppe->flow_diag;
++ 	struct flow_rule *rule = flow_cls_offload_flow_rule(f);
++ 	struct airoha_flow_table_entry *e;
++ 	struct airoha_gdm_dev *egress_dev;
++@@ -1618,6 +1634,7 @@
++ 
++ 		flow_rule_match_control(rule, &match);
++ 		addr_type = match.key->addr_type;
+++		diag->last_addr_type = addr_type;
++ 		if (flow_rule_has_control_flags(match.mask->flags,
++ 						f->common.extack))
++ 			return -EOPNOTSUPP;
++@@ -1664,7 +1681,9 @@
++ 		return -EOPNOTSUPP;
++ 	}
++ 
+++	diag->last_stage = AIROHA_FLOW_ACTIONS;
++ 	flow_action_for_each(i, act, &rule->action) {
+++		diag->last_action = act->id;
++ 		switch (act->id) {
++ 		case FLOW_ACTION_MANGLE:
++ 			if (offload_type == PPE_PKT_TYPE_BRIDGE)
++@@ -1702,10 +1721,14 @@
++ 		}
++ 	}
++ 
+++	diag->last_stage = AIROHA_FLOW_MAC;
++ 	if (!is_valid_ether_addr(data.eth.h_source) ||
++ 	    !is_valid_ether_addr(data.eth.h_dest))
++ 		return -EINVAL;
++ 
+++	diag->last_stage = AIROHA_FLOW_PREPARE;
+++	if (odev)
+++		strscpy(diag->last_egress, odev->name, sizeof(diag->last_egress));
++ 	err = airoha_ppe_foe_entry_prepare(eth, &hwe, odev, offload_type,
++ 					   &data, l4proto, dsfield,
++ 					   &egress_dev);
++@@ -1717,6 +1740,7 @@
++ 		return err;
++ 	}
++ 
+++	diag->last_stage = AIROHA_FLOW_PORTS;
++ 	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_PORTS)) {
++ 		struct flow_match_ports ports;
++ 
++@@ -1749,6 +1773,7 @@
++ 		airoha_ppe_foe_entry_set_ipv6_tuple(&hwe, &data);
++ 	}
++ 
+++	diag->last_stage = AIROHA_FLOW_MANGLE;
++ 	flow_action_for_each(i, act, &rule->action) {
++ 		if (act->id != FLOW_ACTION_MANGLE)
++ 			continue;
++@@ -1756,6 +1781,7 @@
++ 		if (offload_type == PPE_PKT_TYPE_BRIDGE)
++ 			return -EOPNOTSUPP;
++ 
+++		diag->last_action = act->mangle.htype;
++ 		switch (act->mangle.htype) {
++ 		case FLOW_ACT_MANGLE_HDR_TYPE_TCP:
++ 		case FLOW_ACT_MANGLE_HDR_TYPE_UDP:
++@@ -1775,12 +1801,14 @@
++ 			return err;
++ 	}
++ 
+++	diag->last_stage = AIROHA_FLOW_TUPLE;
++ 	if (addr_type == FLOW_DISSECTOR_KEY_IPV4_ADDRS) {
++ 		err = airoha_ppe_foe_entry_set_ipv4_tuple(&hwe, &data, true);
++ 		if (err)
++ 			return err;
++ 	}
++ 
+++	diag->last_stage = AIROHA_FLOW_ALLOCATE;
++ 	e = kzalloc(sizeof(*e), GFP_KERNEL);
++ 	if (!e)
++ 		return -ENOMEM;
++@@ -1792,10 +1820,12 @@
++ 	e->egress_dev = egress_dev;
++ 	memcpy(&e->data, &hwe, sizeof(e->data));
++ 
+++	diag->last_stage = AIROHA_FLOW_COMMIT;
++ 	err = airoha_ppe_foe_flow_commit_entry(eth->ppe, e);
++ 	if (err)
++ 		goto free_entry;
++ 
+++	diag->last_stage = AIROHA_FLOW_INSERT;
++ 	err = rhashtable_insert_fast(&eth->flow_table, &e->node,
++ 				     airoha_flow_table_params);
++ 	if (err < 0)
++@@ -1807,6 +1837,37 @@
++ 	airoha_ppe_foe_flow_remove_entry(eth->ppe, e);
++ free_entry:
++ 	kfree(e);
+++
+++	return err;
+++}
+++
+++static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+++					   struct flow_cls_offload *f)
+++{
+++	struct airoha_ppe_flow_diag *diag = &eth->ppe->flow_diag;
+++	int err;
+++
+++	lockdep_assert_held(&flow_offload_mutex);
+++	diag->replace_calls++;
+++	diag->last_stage = AIROHA_FLOW_PARSE;
+++	diag->last_action = -1;
+++	diag->last_addr_type = 0;
+++	diag->last_egress[0] = '\0';
+++	diag->wdma_error = -ENODATA;
+++	diag->wdma_wed = false;
+++	diag->wdma_idx = 0;
+++	diag->wdma_queue = 0;
+++	diag->wdma_bss = 0;
+++	diag->wdma_wcid = 0;
+++	diag->wdma_sta_id = 0;
+++	err = __airoha_ppe_flow_offload_replace(eth, f);
+++	diag->last_error = err;
+++	if (err) {
+++		diag->errors[diag->last_stage]++;
+++	} else {
+++		diag->replace_success++;
+++		diag->last_stage = AIROHA_FLOW_COMPLETE;
+++	}
++ 
++ 	return err;
++ }
++diff --git a/drivers/net/ethernet/airoha/airoha_ppe_debugfs.c b/drivers/net/ethernet/airoha/airoha_ppe_debugfs.c
++--- a/drivers/net/ethernet/airoha/airoha_ppe_debugfs.c
+++++ b/drivers/net/ethernet/airoha/airoha_ppe_debugfs.c
++@@ -222,6 +222,47 @@
++ }
++ DEFINE_SHOW_ATTRIBUTE(airoha_ppe_debugfs_accounting);
++ 
+++static int airoha_ppe_debugfs_flow_setup_show(struct seq_file *m, void *private)
+++{
+++	static const char * const stage_names[] = {
+++		[AIROHA_FLOW_PARSE] = "parse",
+++		[AIROHA_FLOW_ACTIONS] = "actions",
+++		[AIROHA_FLOW_MAC] = "mac",
+++		[AIROHA_FLOW_PREPARE] = "prepare",
+++		[AIROHA_FLOW_PORTS] = "ports",
+++		[AIROHA_FLOW_MANGLE] = "mangle",
+++		[AIROHA_FLOW_TUPLE] = "tuple",
+++		[AIROHA_FLOW_ALLOCATE] = "allocate",
+++		[AIROHA_FLOW_COMMIT] = "commit",
+++		[AIROHA_FLOW_INSERT] = "insert",
+++		[AIROHA_FLOW_COMPLETE] = "complete",
+++	};
+++	struct airoha_ppe *ppe = m->private;
+++	struct airoha_ppe_flow_diag *diag = &ppe->flow_diag;
+++	unsigned int i;
+++
+++	mutex_lock(&flow_offload_mutex);
+++	seq_printf(m, "replace_calls: %llu\nreplace_success: %llu\n",
+++		   diag->replace_calls, diag->replace_success);
+++	for (i = 0; i < AIROHA_FLOW_STAGE_COUNT; i++)
+++		seq_printf(m, "reject_%s: %llu\n", stage_names[i], diag->errors[i]);
+++	seq_printf(m, "last_stage: %s\nlast_error: %d\nlast_action: %d\n",
+++		   stage_names[diag->last_stage], diag->last_error, diag->last_action);
+++	seq_printf(m, "last_addr_type: %u\nlast_egress: %s\n",
+++		   diag->last_addr_type, diag->last_egress);
+++	seq_printf(m, "wdma_error: %d\nwdma_wed: %u\nwdma_idx: %u\n",
+++		   diag->wdma_error, diag->wdma_wed, diag->wdma_idx);
+++	seq_printf(m, "wdma_queue: %u\nwdma_bss: %u\nwdma_wcid: %u\nwdma_sta_id: %u\n",
+++		   diag->wdma_queue, diag->wdma_bss, diag->wdma_wcid, diag->wdma_sta_id);
+++	mutex_unlock(&flow_offload_mutex);
+++	seq_printf(m, "hw_commit_calls: %lld\nhw_commit_errors: %lld\n",
+++		   (long long)atomic64_read(&diag->hw_commit_calls),
+++		   (long long)atomic64_read(&diag->hw_commit_errors));
+++
+++	return 0;
+++}
+++DEFINE_SHOW_ATTRIBUTE(airoha_ppe_debugfs_flow_setup);
+++
++ static int airoha_ppe_debugfs_config_show(struct seq_file *m, void *private)
++ {
++ 	struct airoha_ppe *ppe = m->private;
++@@ -329,6 +370,8 @@
++ int airoha_ppe_debugfs_init(struct airoha_ppe *ppe)
++ {
++ 	ppe->debugfs_dir = debugfs_create_dir("ppe", NULL);
+++	debugfs_create_file("flow_setup", 0400, ppe->debugfs_dir, ppe,
+++			    &airoha_ppe_debugfs_flow_setup_fops);
++ 	if (ppe->host_managed)
++ 		debugfs_create_file("accounting", 0444, ppe->debugfs_dir, ppe,
++ 				    &airoha_ppe_debugfs_accounting_fops);
+diff --git a/target/linux/airoha/patches-6.18/947-net-airoha-wed-allow-multiple-flow-blocks.patch b/target/linux/airoha/patches-6.18/947-net-airoha-wed-allow-multiple-flow-blocks.patch
+new file mode 100644
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/947-net-airoha-wed-allow-multiple-flow-blocks.patch
+@@ -0,0 +1,65 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: let WED AP ports bind multiple flowtables
++
++flow_block_cb_setup_simple() rejects a second block for the same AP
++netdev with EBUSY. This prevents inet and bridge flowtables sharing a
++Wi-Fi port, and prevents atomic replacement during firewall reload.
++Use the same per-block lookup and reference handling as airoha Ethernet.
++Keep the netdev as callback identity and the WED device as private data.
++
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++diff --git a/drivers/net/ethernet/airoha/airoha_wed.c b/drivers/net/ethernet/airoha/airoha_wed.c
++--- a/drivers/net/ethernet/airoha/airoha_wed.c
+++++ b/drivers/net/ethernet/airoha/airoha_wed.c
++@@ -578,12 +578,47 @@
++ 			       enum tc_setup_type type, void *data)
++ {
++ 	static LIST_HEAD(blocks);
+++	struct flow_block_offload *f = data;
+++	struct flow_block_cb *block_cb;
++ 
++ 	if (type != TC_SETUP_BLOCK && type != TC_SETUP_FT)
++ 		return -EOPNOTSUPP;
++-
++-	return flow_block_cb_setup_simple(data, &blocks, airoha_wed_setup_cb,
++-					 dev, wed, true);
+++	if (f->binder_type != FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
+++		return -EOPNOTSUPP;
+++
+++	/* Like the Ethernet provider, allow a netdev in both inet and bridge
+++	 * flowtables. A global per-device busy check also rejects reloads
+++	 * while the previous block is still waiting to be unbound.
+++	 */
+++	f->driver_block_list = &blocks;
+++	switch (f->command) {
+++	case FLOW_BLOCK_BIND:
+++		block_cb = flow_block_cb_lookup(f->block, airoha_wed_setup_cb, dev);
+++		if (block_cb) {
+++			flow_block_cb_incref(block_cb);
+++			return 0;
+++		}
+++		block_cb = flow_block_cb_alloc(airoha_wed_setup_cb, dev, wed, NULL);
+++		if (IS_ERR(block_cb))
+++			return PTR_ERR(block_cb);
+++
+++		flow_block_cb_incref(block_cb);
+++		flow_block_cb_add(block_cb, f);
+++		list_add_tail(&block_cb->driver_list, &blocks);
+++		return 0;
+++	case FLOW_BLOCK_UNBIND:
+++		block_cb = flow_block_cb_lookup(f->block, airoha_wed_setup_cb, dev);
+++		if (!block_cb)
+++			return -ENOENT;
+++
+++		if (!flow_block_cb_decref(block_cb)) {
+++			flow_block_cb_remove(block_cb, f);
+++			list_del(&block_cb->driver_list);
+++		}
+++		return 0;
+++	default:
+++		return -EOPNOTSUPP;
+++	}
++ }
++ 
++ static void airoha_wed_ppe_check(struct mtk_wed_device *wed, struct sk_buff *skb,
