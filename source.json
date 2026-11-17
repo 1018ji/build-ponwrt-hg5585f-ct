@@ -73,7 +73,7 @@
     },
     {
       "name": "0018-hg5585f-wed-txp-wcid-sentinel.patch",
-      "sha256": "6410ec2fb95ed8eee710c990933e62ab0b7adab7068cec111357f508a23fe5c9"
+      "sha256": "d4041fb972d7c74537a634c73770e15f1d088cb46a177b66a96948573cd311ff"
     },
     {
       "name": "0019-hg5585f-wed-irq-progress-and-quarantine.patch",
@@ -81,7 +81,7 @@
     },
     {
       "name": "0020-hg5585f-wed-exception-snapshots.patch",
-      "sha256": "df9848b77579d0a42203c5d79ba255b6939b8cc978e5abedb705cd548219d851"
+      "sha256": "f9df447039bf06dd1740c083994c991becf76fe83f893ec8ff0fd5d0f29d4fd4"
     },
     {
       "name": "0021-hg5585f-wed-diag-capture-256.patch",
