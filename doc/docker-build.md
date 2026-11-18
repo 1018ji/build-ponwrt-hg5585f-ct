@@ -48,6 +48,15 @@ bash scripts/build-docker.sh build
 HG5585F_JOBS=6 bash scripts/build-docker.sh build
 ```
 
+下载默认优先使用 ImmortalWrt 和 OpenWrt CDN 镜像，失败后继续使用 OpenWrt 自带的其他镜像和原始地址。需要指定自己的镜像列表时设置 `HG5585F_DOWNLOAD_MIRROR`，多个地址用分号分隔：
+
+```bash
+HG5585F_DOWNLOAD_MIRROR='https://mirror.example/a;https://mirror.example/b' \
+  bash scripts/build-docker.sh build
+```
+
+所有下载仍按包定义的 SHA256 校验。
+
 正常构建不需要 `--reuse` 参数。`shell` 和 `check` 仍可作为模式使用：
 
 ```bash

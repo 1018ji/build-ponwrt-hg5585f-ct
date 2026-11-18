@@ -35,7 +35,7 @@ new file mode 100644
 + #define EN7581_WED_PAYLOAD_SIZE		1900
 +-#define EN7581_WED_EXT_ERRORS		0x006f0013
 ++#define EN7581_WED_EXT_ERRORS		0x006f0011
-+ #define EN7581_WED_WDMA_CFG			0x50710060
++ #define EN7581_WED_WDMA_CFG		0x50710060
 + #define EN7581_WDMA_CFG			0x5c000450
 + #define EN7581_WED_WDMA_RX_THRESH(n)	(0x940 + (n) * 4)
 diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py

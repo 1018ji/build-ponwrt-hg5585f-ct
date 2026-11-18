@@ -70,6 +70,7 @@ esac
 
 jobs=${HG5585F_JOBS:-$(nproc)}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'HG5585F_JOBS must be a positive integer' >&2; exit 2; }
+download_mirror=${HG5585F_DOWNLOAD_MIRROR:-https://mirror.immortalwrt.org/sources\;https://sources.cdn.openwrt.org}
 recipe_commit=${HG5585F_RECIPE_COMMIT:-$(git -c safe.directory=/recipe -C /recipe rev-parse --verify HEAD)}
 [[ "$recipe_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected a full recipe Git commit ID' >&2; exit 2; }
 exec 9>/workdir/.build.lock
@@ -159,7 +160,7 @@ fi
 step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-theme-bootstrap luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia && sed -i "s#\$(TOPDIR)/feeds/luci/luci.mk#../../luci/luci.mk#" feeds/pon_userspace/luci-app-pon/Makefile'
 step 'Resolve final OpenWrt configuration' make defconfig
 step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
-step 'Download package sources' bash -o pipefail -c "make download -j\"$jobs\" 2>&1 | tee \"$output/download.log\""
+step 'Download package sources' bash -o pipefail -c "DOWNLOAD_MIRROR=\"$download_mirror\" make download -j\"$jobs\" 2>&1 | tee \"$output/download.log\""
 log "INFO  Firmware build uses make -j$jobs"
 if ! step 'Compile native, WED and NPU firmware' bash -o pipefail -c "make -j\"$jobs\" 2>&1 | tee \"$output/build.log\""; then
   step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s 2>&1 | tee -a \"$output/build.log\""

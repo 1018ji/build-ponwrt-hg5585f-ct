@@ -109,7 +109,7 @@
     },
     {
       "name": "0028-hg5585f-mask-benign-tkid-error.patch",
-      "sha256": "6a20b626a151b58d9183a00c16cdd931fba245b1611e71b65a2c12c8a9f0a023"
+      "sha256": "91fe492e0f905c4367f22644b320898da6cfa98371081e986556e0567c571318"
     }
   ],
   "files": {
@@ -442,7 +442,7 @@
       "executable": false
     },
     "target/linux/airoha/patches-6.18/951-net-airoha-mask-benign-tkid-without-payload.patch": {
-      "sha256": "210369d6d173d0a9b1e7c35d1b32682808e62012136d8a1e87724d821cb785d9",
+      "sha256": "2716ee5493f0fe373e7cc197e757a0640b157da5693ae315aa1ea4a91c41e9de",
       "executable": false
     }
   },
