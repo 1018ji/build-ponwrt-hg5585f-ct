@@ -42,6 +42,10 @@
     {
       "name": "0010-hg5585f-wifi-dma-recovery.patch",
       "sha256": "7a53856487efd325b3a2af25c7fd5719e1a72b37efdda6b7a7f1b1c10fe992a9"
+    },
+    {
+      "name": "0011-hg5585f-fix-linux-recovery-test-type.patch",
+      "sha256": "f4708f8aa667ea59ceb708d36291f413576bbcec38933957aaba1b3eeaf7fe0e"
     }
   ],
   "files": {
@@ -394,7 +398,7 @@
       "executable": false
     },
     "scripts/tests/test-mt7915-dma-recovery.py": {
-      "sha256": "ae6bfd90429bc7ad5822488ceecfd10c6f90b7b7d90a7f484ecfb566a2b60868",
+      "sha256": "5054577b1051b6855677e29186048b1201ad1eba57ed9727eb6e7e6b1565a33e",
       "executable": false
     }
   },

@@ -1,0 +1,21 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] hg5585f: match kernel u64 type in Linux recovery tests
+
+Use unsigned long long for the test harness u64, matching the Linux kernel
+instead of the host libc uint64_t. On Linux LP64 uint64_t is unsigned long,
+which makes valid kernel %llu diagnostics fail the harness format checks.
+
+Signed-off-by: PonWrt developers <noreply@localhost>
+---
+diff --git a/scripts/tests/test-mt7915-dma-recovery.py b/scripts/tests/test-mt7915-dma-recovery.py
+--- a/scripts/tests/test-mt7915-dma-recovery.py
++++ b/scripts/tests/test-mt7915-dma-recovery.py
+@@ -40,7 +40,7 @@
+ #pragma GCC diagnostic ignored "-Wunused-function"
+ #pragma GCC diagnostic ignored "-Wunused-variable"
+ typedef uint32_t u32;
+-typedef uint64_t u64;
++typedef unsigned long long u64;
+ #define BIT(n) (1U << (n))
+ #define READ_ONCE(x) (x)
+ #define WRITE_ONCE(x,v) ((x)=(v))

@@ -40,7 +40,7 @@ PREFIX = r'''
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 typedef uint32_t u32;
-typedef uint64_t u64;
+typedef unsigned long long u64;
 #define BIT(n) (1U << (n))
 #define READ_ONCE(x) (x)
 #define WRITE_ONCE(x,v) ((x)=(v))
