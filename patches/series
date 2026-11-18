@@ -10,3 +10,4 @@
 0010-hg5585f-wifi-dma-recovery.patch
 0011-hg5585f-fix-linux-recovery-test-type.patch
 0012-hg5585f-combine-wifi-debug-switches.patch
+0013-hg5585f-disable-wed-diagnostic-hotpath.patch
