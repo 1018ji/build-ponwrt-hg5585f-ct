@@ -14365,3 +14365,29 @@ index 0000000..55f6142
 + #define AIROHA_WLAN_LEGACY_PKT_COUNT	3000
 + #define AIROHA_WLAN_LEGACY_PKT_BYTES	2048
 + #define AIROHA_WLAN_LEGACY_BA_BYTES	0x80000
+diff --git a/target/linux/airoha/base-files/etc/board.d/03_pon_data b/target/linux/airoha/base-files/etc/board.d/03_pon_data
+index e41b252..1eaf7fd 100644
+--- a/target/linux/airoha/base-files/etc/board.d/03_pon_data
++++ b/target/linux/airoha/base-files/etc/board.d/03_pon_data
+@@ -85,6 +85,21 @@ nokia,xg-040g-md-ubi|nokia,xg-040g-tf-ubi|nokia,xg-040g-mf-ubi|nokia,xg-040g-mf)
+ 	json_close_object
+ 	json_close_object
+ 	;;
++fiberhome,hg5585f-ct)
++	identity_available=1
++	json_add_object identity
++	json_add_object targets
++	json_add_object factory
++	json_add_object fields
++	# HG5585F factory-1m.bin: base MAC, GPON binary SN and device SN.
++	identity_field board_mac mac 8192 6 mac-binary6
++	identity_field pon_sn pon-sn 8208 8 pon-binary8
++	identity_field device_sn serial-text 8224 17 serial-text
++	json_close_object
++	json_close_object
++	json_close_object
++	json_close_object
++	;;
+ h3c,hm2004-du)
+ 	identity_available=1
+ 	json_add_object identity
