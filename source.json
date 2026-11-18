@@ -22,6 +22,10 @@
     {
       "name": "0005-hg5585f-luci-and-build-cleanup.patch",
       "sha256": "ed58a884ca7e2d2739c9f7aa12fcced5d9259ae5ee6baf8f21cd0544f69d0bba"
+    },
+    {
+      "name": "0006-hg5585f-bridge-offload-tools.patch",
+      "sha256": "0b6fc2e864a493a4c91dc7f93f7a054d58f854f2a4d0a8fcd4d74a2be9f3a8c4"
     }
   ],
   "files": {
@@ -153,7 +157,7 @@
       "executable": false
     },
     "configs/hg5585f-ct.config": {
-      "sha256": "5576c7c5ade80718851e497ac2eca72a009fdaa8468973e076d73ede7d2ec456",
+      "sha256": "8af5212718b1088935e324f497afa588bcd2bdb9d54e03880c5bcb73da25e541",
       "executable": false
     },
     "files/etc/uci-defaults/99-hg5585f-hardware": {
