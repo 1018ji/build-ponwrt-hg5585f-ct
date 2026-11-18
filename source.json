@@ -9,7 +9,7 @@
     },
     {
       "name": "0002-hg5585f-offload.patch",
-      "sha256": "6b225fdc7d3a484860421e2a33bef657e9d671af1bbef6b08e89f69a6458c45b"
+      "sha256": "226ae1971401bcf9efc7a2e29eb8c9a5bbbe0f551797b561aa473c58a2c34876"
     },
     {
       "name": "0003-hg5585f-recovery.patch",
@@ -22,10 +22,6 @@
     {
       "name": "0005-hg5585f-luci-and-build-cleanup.patch",
       "sha256": "ed58a884ca7e2d2739c9f7aa12fcced5d9259ae5ee6baf8f21cd0544f69d0bba"
-    },
-    {
-      "name": "0006-hg5585f-bridge-offload-tools.patch",
-      "sha256": "0b6fc2e864a493a4c91dc7f93f7a054d58f854f2a4d0a8fcd4d74a2be9f3a8c4"
     }
   ],
   "files": {
