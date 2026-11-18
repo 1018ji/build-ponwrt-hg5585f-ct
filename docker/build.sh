@@ -70,21 +70,21 @@ esac
 
 jobs=${HG5585F_JOBS:-$(nproc)}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'HG5585F_JOBS must be a positive integer' >&2; exit 2; }
+recipe_commit=${HG5585F_RECIPE_COMMIT:-$(git -c safe.directory=/recipe -C /recipe rev-parse --verify HEAD)}
+[[ "$recipe_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected a full recipe Git commit ID' >&2; exit 2; }
 exec 9>/workdir/.build.lock
 flock -n 9 || { echo 'Another HG5585F build is already running' >&2; exit 1; }
 build_root=/workdir/code
 recipe=$build_root/recipe
 source=$build_root/openwrt
 run_root=/run
-target_root=$run_root/target
-build_id=$(date '+%Y%m%d-%H%M%S')
-suffix=0
-while [ -e "$run_root/log/$build_id" ] || [ -e "$target_root/$build_id" ]; do
-  suffix=$((suffix + 1))
-  build_id=$(printf '%s-%02d' "$(date '+%Y%m%d-%H%M%S')" "$suffix")
-done
-output=$run_root/log/$build_id
-export build_root recipe source output target_root build_id
+build_id=${recipe_commit:0:12}
+output=$run_root/$build_id
+export build_root recipe source output
+rm -rf -- "$output"
+mkdir -p "$output"
+log_file=$output/steps.log
+log "INFO  Build commit=$recipe_commit jobs=$jobs source=$source"
 if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
   if previous=$(python3 /recipe/scripts/upgrade-source.py select /workdir/trees); then
     if [ -n "$previous" ]; then
@@ -93,7 +93,7 @@ if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
     fi
   fi
 fi
-mkdir -p "$recipe" "$output" "$target_root" /workdir/dl /workdir/ccache
+mkdir -p "$recipe" /workdir/dl /workdir/ccache
 # Save the previous recipe before the snapshot replaces it.
 if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
   if [ ! -f "$recipe/source.json" ]; then
@@ -102,9 +102,6 @@ if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
   fi
   cp "$recipe/source.json" "$source/.hg5585f-source.json"
 fi
-: > "$output/steps.log"
-log_file=$output/steps.log
-log "INFO  Build id=$build_id jobs=$jobs source=$source"
 step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 export CCACHE_DIR=/workdir/ccache CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
 export GITHUB_WORKSPACE="$recipe"
@@ -135,7 +132,30 @@ else
   log 'INFO  Reusing existing OpenWrt configuration'
 fi
 step 'Merge HG5585F profile configuration' bash -o pipefail -c './scripts/kconfig.pl + .config configs/hg5585f-ct.config > .config.merged && mv .config.merged .config'
-step 'Update pinned package feeds' bash -o pipefail -c './scripts/feeds update -a'
+if python3 - "$recipe/source.json" <<'PY'
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+data = json.loads(Path(sys.argv[1]).read_text())
+for name, expected in data['feeds'].items():
+    path = Path('feeds') / name
+    if not path.is_dir():
+        raise SystemExit(1)
+    try:
+        actual = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=path, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit(1)
+    if actual != expected['commit']:
+        raise SystemExit(1)
+PY
+then
+  log 'INFO  Reusing pinned package feeds'
+else
+  step 'Update pinned package feeds' bash -o pipefail -c './scripts/feeds update -a'
+fi
 step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-theme-bootstrap luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia && sed -i "s#\$(TOPDIR)/feeds/luci/luci.mk#../../luci/luci.mk#" feeds/pon_userspace/luci-app-pon/Makefile'
 step 'Resolve final OpenWrt configuration' make defconfig
 step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
@@ -147,14 +167,13 @@ fi
 step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
 step 'Archive validated firmware images' bash -euo pipefail -c '
   image_dir=bin/targets/airoha/an7581
-  archive="$target_root/$build_id"
-  temporary=$(mktemp -d "$target_root/.$build_id.XXXXXX")
+  temporary=$(mktemp -d "$output/.images.XXXXXX")
   trap '\''rm -rf "$temporary"'\'' EXIT
-  find "$image_dir" -maxdepth 1 -type f -name "*.itb" -exec cp -a {} "$temporary/" \;
-  test "$(find "$temporary" -maxdepth 1 -type f -name "*.itb" | wc -l)" -gt 0
-  mv "$temporary" "$archive"
-  trap - EXIT
+  shopt -s nullglob
+  images=("$image_dir"/*.itb)
+  test "${#images[@]}" -gt 0
+  cp -a -- "${images[@]}" "$temporary/"
+  mv -- "$temporary/"*.itb "$output/"
 '
 step 'Print compiler cache statistics' bash -o pipefail -c "ccache -s | tee \"$output/ccache.log\""
-log "OUTPUT logs: $output"
-log "OUTPUT firmware: $target_root/$build_id"
+log "OUTPUT logs and firmware: $output"

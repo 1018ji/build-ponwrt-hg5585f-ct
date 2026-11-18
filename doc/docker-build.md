@@ -1,6 +1,6 @@
 # HG5585F 本地 Docker 编译
 
-本地构建使用一个持久 Docker volume 保存源码、工具链、下载包和 ccache。宿主机只挂载 `run` 目录，用来保存构建日志和已经验证过的 `.itb` 固件。
+本地构建使用一个持久 Docker volume 保存源码、工具链、下载包和 ccache。当前仓库只读挂载到 `/recipe`；宿主机输出目录 `run` 保存构建日志和验证通过的 `.itb` 固件。
 
 工作区结构如下：
 
@@ -12,9 +12,16 @@ Docker volume /workdir
 └── ccache             编译缓存
 
 宿主机 run/
-├── log/<时间戳>/       steps、download、build、validation、ccache 日志
-└── target/<时间戳>/    本次验证通过的 *.itb
+└── <当前仓库 commit 的前 12 位>/
+    ├── steps.log
+    ├── download.log
+    ├── build.log
+    ├── validation.log
+    ├── ccache.log
+    └── *.itb
 ```
+
+`recipe` 包含本仓库的补丁、配置、`source.json` 和构建、校验脚本。`/workdir/code/recipe` 是每次构建同步的配方副本；OpenWrt 源码位于 `code/openwrt`，下载包和编译缓存单独保存。
 
 ## 编译
 
@@ -32,8 +39,8 @@ bash scripts/build-docker.sh build
 - 在 `/workdir/code/openwrt` 保持固定源码路径；
 - 首次运行 clone 源码，后续只应用新增补丁；
 - 使用宿主机逻辑 CPU 执行 `make -jN`；
-- 验证成功后，把本次生成的 `.itb` 复制到 `run/target/<时间戳>`；
-- 把完整构建日志写入 `run/log/<同一时间戳>`。
+- 在 `run/<当前仓库 commit 的前 12 位>` 中直接保存日志和验证通过的 `.itb`；
+- 同一 commit 重建时先清空该输出目录，其他 commit 的结果保留。
 
 指定并发任务数：
 
@@ -50,14 +57,17 @@ bash scripts/build-docker.sh check
 
 ## 固件和日志
 
-每次成功构建都会留下独立目录，例如：
+目录使用 `build-ponwrt-hg5585f-ct` 仓库的 commit ID，和 OpenWrt 的 pinned source commit 区分，例如：
 
 ```text
-run/log/20261118-012205/
-run/target/20261118-012205/
+run/907d745abcde/
+├── steps.log
+├── build.log
+├── validation.log
+└── *.itb
 ```
 
-固件归档只包含 `.itb`。脚本会先完成编译后验证，再通过临时目录复制并改名，失败的构建不会产生完整固件目录。时间戳冲突时会追加序号。
+构建开始时清空当前 commit 的输出目录，因此失败时会保留本次日志，固件在编译后验证通过才复制。复制先写入临时目录，成功后再移入输出目录，仅导出 `.itb`。使用未提交修改构建时，仍归入当前 HEAD 的目录，完整 commit ID 会写入 `steps.log`。
 
 ## 增量构建
 
@@ -68,6 +78,8 @@ run/target/20261118-012205/
 - `/workdir/ccache` 编译缓存；
 - 已生成的配置和软件包构建状态。
 
+feeds 已存在且 HEAD 与 `source.json` 一致时直接复用，缺失或版本变化时才执行更新。
+
 recipe 的补丁序列保持追加式更新。修改已有补丁或改变 pinned source commit 时，增量升级会停止并报告原因；这时需要明确处理旧源码和相关构建状态，脚本不会自动混用它们。
 
 已有旧版 volume 中如果存在兼容的 `trees/<旧 recipe>`，首次切换时会通过 `code` 软链接继续使用它，避免立即重新 clone；后续构建仍使用同一份源码和缓存。
@@ -75,14 +87,14 @@ recipe 的补丁序列保持追加式更新。修改已有补丁或改变 pinned
 ## 手动运行 image
 
 ```bash
-mkdir -p /Users/happyelements/Desktop/刷机/run/log \
-         /Users/happyelements/Desktop/刷机/run/target
+mkdir -p /Users/happyelements/Desktop/刷机/run
 docker run --rm --init -it \
   --name hg5585f-local-build \
   --mount type=bind,source=/Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct,target=/recipe,readonly \
   --mount type=bind,source=/Users/happyelements/Desktop/刷机/run,target=/run \
   --mount type=volume,source=hg5585f-ubuntu22-aarch64,target=/workdir \
   --env HG5585F_JOBS=6 \
+  --env HG5585F_RECIPE_COMMIT="$(git rev-parse HEAD)" \
   hg5585f-builder:ubuntu22.04 build
 ```
 
