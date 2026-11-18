@@ -92,7 +92,9 @@ mkdir -p "$output"
 log_file=$output/steps.log
 log "INFO  Build commit=$recipe_commit profile=$build_profile jobs=$jobs source=$source"
 mkdir -p "$recipe" /workdir/dl /workdir/ccache
-step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
+step 'Snapshot build recipe into persistent Linux volume' rsync -a --no-owner --no-group --delete \
+  --exclude '.git' --exclude '__pycache__' --exclude '*.pyc' \
+  --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
   if previous=$(python3 /recipe/scripts/upgrade-source.py select /workdir/trees); then
     if [ -n "$previous" ]; then

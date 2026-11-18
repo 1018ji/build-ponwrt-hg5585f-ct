@@ -136,6 +136,15 @@ if sys.argv[1] == 'update':
         self.assertEqual(self.cache.stat().st_mtime_ns, stamp)
         self.assertNotIn('update', (self.root/'feeds.log').read_text())
 
+    def test_recipe_snapshot_excludes_python_bytecode(self):
+        self.write(self.recipe/'scripts/__pycache__/host.cpython-314.pyc', 'host cache')
+        self.write(self.recipe/'scripts/host.pyc', 'host cache')
+        self.assert_success(self.build())
+        snapshot = self.work/'code/recipe'
+        self.assertFalse((snapshot/'scripts/__pycache__').exists())
+        self.assertFalse((snapshot/'scripts/host.pyc').exists())
+        self.assertTrue((snapshot/'scripts/prepare.py').is_file())
+
     def test_missing_source_is_cloned_once(self):
         shutil.rmtree(self.source)
         self.assert_success(self.build())
