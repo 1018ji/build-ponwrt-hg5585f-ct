@@ -69,6 +69,8 @@ struct airoha_wed {
     u32 irq_last_status,irq_last_errors;
     struct work_struct irq_fault_work;
     struct mutex quiesce_lock;
+    const char *last_stop_stage;
+    int last_stop_error,last_dma_stop_error,last_flush_error;
 };
 struct mtk_wed_device {
     struct airoha_wed *priv;
