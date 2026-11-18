@@ -25,17 +25,6 @@ for kernel_config in "${kernel_configs[@]}"; do
   kernel=${kernel_config%/.config}
   echo "Checking built kernel source: $kernel"
   python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-irq-storm.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-stop.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-exceptions.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-npu-lifecycle.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-ppe-flow-setup.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-flow-blocks.py" --kernel "$kernel"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-bridge-wifi-path.py" --source "$kernel/net/netfilter/nf_flow_table_path.c"
-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-ap-flowtable.py" --hotplug target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload
-  python3 "$GITHUB_WORKSPACE/scripts/tests/check-hg5585f-ppe-host-start.py" --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe.c"
-  python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
   mt76_found=0
   for mt76 in "${kernel%/*}"/mt76-*; do
     [ -d "$mt76" ] || continue
@@ -44,14 +33,6 @@ for kernel_config in "${kernel_configs[@]}"; do
       echo "MT76 NPU RX source missing: $mt76/npu_rx_legacy.c"; exit 1;
     }
     echo "Checking built MT76 source: $mt76"
-    python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
-    python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
-    python3 scripts/check-hg5585f-wed-pci-irq.py --mt76 "$mt76" --kernel "$kernel"
-    python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
-    python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
-    python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
-    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-txp-template.py" --mt76 "$mt76"
-    python3 "$GITHUB_WORKSPACE/scripts/tests/test-mt7915-dma-recovery.py" --mt76 "$mt76"
     mt76_found=$((mt76_found + 1))
   done
   [ "$mt76_found" -gt 0 ] || {

@@ -12,3 +12,5 @@
 0012-hg5585f-combine-wifi-debug-switches.patch
 0013-hg5585f-disable-wed-diagnostic-hotpath.patch
 0014-hg5585f-stub-wed-diagnostic-switch-test.patch
+0015-hg5585f-add-airoha-npu-luci-app.patch
+0016-hg5585f-remove-post-build-simulation-tests.patch

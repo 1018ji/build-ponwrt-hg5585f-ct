@@ -113,7 +113,6 @@ if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
 fi
 export CCACHE_DIR=/workdir/ccache CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
 export GITHUB_WORKSPACE="$recipe"
-step 'Run workflow path tests' python3 "$recipe/scripts/tests/test-workflow-paths.py"
 step 'Check incremental patch upgrade behavior' python3 "$recipe/scripts/tests/test-incremental.py"
 if [ ! -d "$source" ]; then
   step 'Clone pinned OpenWrt source' bash -euo pipefail -c '

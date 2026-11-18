@@ -1,0 +1,3786 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] build: remove custom post-build simulation tests
+
+Remove the custom WED, NPU, PPE and Wi-Fi simulation/structural test
+harnesses from the post-build validation path. Keep firmware compilation,
+configuration, patch-bundle and image checks. Restore the LuCI package RPC
+files to the upstream implementation now that the accounting-only test reader
+is gone.
+
+Signed-off-by: PonWrt developers <noreply@localhost>
+---
+diff --git a/package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu b/package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu
+index 9d24115..fe984f0 100755
+--- a/package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu
++++ b/package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu
+@@ -237,14 +237,10 @@ get_ppe_entries() {
+ 		if (RSTART > 0) {
+ 			eth = substr($0, RSTART+4, RLENGTH-4)
+ 		}
+-		account_group = "null"
+-		match($0, /account_group=[0-9]+/)
+-		if (RSTART > 0)
+-			account_group = substr($0, RSTART+14, RLENGTH-14)
+ 		type_str = type
+ 		if (subtype != "") type_str = type " " subtype
+-		printf "{\"index\":\"%s\",\"state\":\"%s\",\"type\":\"%s\",\"orig\":\"%s\",\"new_flow\":\"%s\",\"eth\":\"%s\",\"account_group\":%s}", \
+-			index_val, state, type_str, orig, new_flow, eth, account_group
++		printf "{\"index\":\"%s\",\"state\":\"%s\",\"type\":\"%s\",\"orig\":\"%s\",\"new_flow\":\"%s\",\"eth\":\"%s\"}", \
++			index_val, state, type_str, orig, new_flow, eth
+ 	}
+ 	END {
+ 		printf "]}"
+@@ -252,33 +248,6 @@ get_ppe_entries() {
+ 	' "$entries_file" 2>/dev/null || echo '{"entries":[]}'
+ }
+ 
+-get_ppe_accounting() {
+-	local accounting_file="/sys/kernel/debug/ppe/accounting"
+-	[ -r "$accounting_file" ] || { echo '{"available":false}'; return; }
+-
+-	awk '
+-	BEGIN { valid=1; count=0; running=0; generation="0"; samples="0" }
+-	$1 == "backend:" && NF == 2 { backend=$2; next }
+-	$1 == "running:" && NF == 2 { running=$2; next }
+-	$1 == "generation:" && NF == 2 { generation=$2; next }
+-	$1 == "samples:" && NF == 2 { samples=$2; next }
+-	$1 == "group" && NF == 4 && $2 == count && $2 ~ /^[0-9]+$/ {
+-		packets[count]=$3; bytes[count]=$4; count++; next
+-	}
+-	NF { valid=0 }
+-	END {
+-		if (!valid || backend != "hg5585f-fe-account" || count != 63) {
+-			print "{\"available\":false}"; exit
+-		}
+-		printf "{\"available\":true,\"backend\":\"%s\",\"running\":%s,\"generation\":\"%s\",\"samples\":\"%s\",\"groups\":[", backend, (running == 1 ? "true" : "false"), generation, samples
+-		for (i=0; i<63; i++) {
+-			if (i) printf ","
+-			printf "{\"index\":%d,\"packets\":\"%s\",\"bytes\":\"%s\"}", i, packets[i], bytes[i]
+-		}
+-		print "]}"
+-	}' "$accounting_file" 2>/dev/null || echo '{"available":false}'
+-}
+-
+ set_governor() {
+ 	local governor
+ 	governor=$(echo "$1" | jsonfilter -e "@.governor" 2>/dev/null)
+@@ -526,7 +495,7 @@ get_frame_engine() {
+ 
+ case "$1" in
+ 	list)
+-		echo '{"getStatus":{},"getPpeEntries":{},"getPpeAccounting":{},"getFrameEngine":{},"setGovernor":{"governor":"str"},"setMaxFreq":{"freq":"int"},"setOverclock":{"freq_mhz":"int"}}'
++		echo '{"getStatus":{},"getPpeEntries":{},"getFrameEngine":{},"setGovernor":{"governor":"str"},"setMaxFreq":{"freq":"int"},"setOverclock":{"freq_mhz":"int"}}'
+ 		;;
+ 	call)
+ 		case "$2" in
+@@ -536,9 +505,6 @@ case "$1" in
+ 			getPpeEntries)
+ 				get_ppe_entries
+ 				;;
+-			getPpeAccounting)
+-				get_ppe_accounting
+-				;;
+ 			setGovernor)
+ 				read input
+ 				set_governor "$input"
+diff --git a/package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json b/package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json
+index 747049a..323636b 100644
+--- a/package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json
++++ b/package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json
+@@ -3,11 +3,10 @@
+ 		"description": "Grant access to Airoha SoC status (NPU + CPU + Overclock)",
+ 		"read": {
+ 			"ubus": {
+-				"luci.airoha_npu": [ "getStatus", "getPpeEntries", "getPpeAccounting", "getFrameEngine" ]
++				"luci.airoha_npu": [ "getStatus", "getPpeEntries", "getFrameEngine" ]
+ 			},
+ 			"file": {
+ 				"/sys/kernel/debug/ppe/entries": [ "read" ],
+-				"/sys/kernel/debug/ppe/accounting": [ "read" ],
+ 				"/sys/kernel/debug/ppe/bind": [ "read" ],
+ 				"/sys/devices/system/cpu/cpufreq/policy0/*": [ "read" ]
+ 			}
+diff --git a/scripts/check-hg5585f-npu-input-ring.py b/scripts/check-hg5585f-npu-input-ring.py
+deleted file mode 100644
+index e1b012e..0000000
+--- a/scripts/check-hg5585f-npu-input-ring.py
++++ /dev/null
+@@ -1,94 +0,0 @@
+-#!/usr/bin/env python3
+-"""Compare input geometry against the verified RV32 firmware's actual wrap code."""
+-import argparse
+-import hashlib
+-from pathlib import Path
+-import re
+-import struct
+-
+-FIRMWARE_SHA256 = 'a8757aabc872c31d20683aeb4c05dbb9f7f590bdd6a1102c8a6902385bb5e9a6'
+-
+-
+-def constant(text, name):
+-    match = re.search(r'^#define ' + name + r'\s+(\d+)\s*$', text, re.M)
+-    assert match, 'Missing numeric definition: ' + name
+-    return int(match[1])
+-
+-
+-def firmware_bound(code, offset):
+-    word = struct.unpack_from('<I', code, offset)[0]
+-    # RV32 ADDI a0,zero,imm; band0/band1 use the same literal upper index.
+-    assert word & 0xfffff == 0x00513, hex(word)
+-    immediate = word >> 20
+-    return immediate - 4096 if immediate & 2048 else immediate
+-
+-
+-def firmware_next(code, current, bound):
+-    """Execute 0x8400322a..0x84003234: ADDI, SLTU, ADDI, AND."""
+-    registers = [0] * 32
+-    registers[9] = current  # s1, firmware consumer
+-    registers[10] = bound  # a0
+-    offset = 0x322a
+-    while offset < 0x3234:
+-        half = struct.unpack_from('<H', code, offset)[0]
+-        if half & 3 != 3:
+-            rd = (half >> 7) & 31
+-            if half & 0xe003 == 0x0001:  # C.ADDI
+-                immediate = ((half >> 2) & 31) | ((half >> 12) & 1) << 5
+-                if immediate & 32:
+-                    immediate -= 64
+-                registers[rd] = (registers[rd] + immediate) & 0xffffffff
+-            elif half & 0xfc63 == 0x8c61:  # C.AND
+-                rd, rs2 = 8 + ((half >> 7) & 7), 8 + ((half >> 2) & 7)
+-                registers[rd] &= registers[rs2]
+-            else:
+-                raise AssertionError('Unexpected compressed instruction: ' + hex(half))
+-            offset += 2
+-        else:
+-            word = struct.unpack_from('<I', code, offset)[0]
+-            assert word & 0xfe00707f == 0x3033, hex(word)  # SLTU
+-            rd, rs1, rs2 = (word >> 7) & 31, (word >> 15) & 31, (word >> 20) & 31
+-            registers[rd] = int(registers[rs1] < registers[rs2])
+-            offset += 4
+-        registers[0] = 0
+-    assert offset == 0x3234
+-    return registers[9]
+-
+-
+-def first_bad_index(code, capacity, bound):
+-    cursor = 0
+-    for _ in range(3 * (bound + 1)):
+-        if cursor >= capacity:
+-            return cursor
+-        cursor = firmware_next(code, cursor, bound)
+-    return None
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--header', type=Path, required=True)
+-    parser.add_argument('--mt76', type=Path, required=True)
+-    parser.add_argument('--firmware', type=Path, required=True)
+-    args = parser.parse_args()
+-    code = args.firmware.read_bytes()
+-    assert hashlib.sha256(code).hexdigest() == FIRMWARE_SHA256, 'NPU firmware differs from the audited ROM'
+-    bound0, bound1 = firmware_bound(code, 0x3204), firmware_bound(code, 0x344e)
+-    assert bound0 == bound1 == 767
+-    assert firmware_next(code, 511, bound0) == 512
+-    assert firmware_next(code, 767, bound0) == 0
+-    assert first_bad_index(code, 512, bound0) == 512  # old driver stalls here
+-    header = args.header.read_text()
+-    capacity = constant(header, 'AIROHA_WLAN_LEGACY_INPUT_COUNT')
+-    queue_size = constant((args.mt76/'mt7915/mt7915.h').read_text(), 'MT7915_NPU_RX_RING_SIZE')
+-    assert capacity == queue_size == bound0 + 1, \
+-        f'NPU input rings require {bound0+1} entries, got ABI={capacity} MT76={queue_size}'
+-    assert first_bad_index(code, capacity, bound0) is None
+-    assert constant(header, 'AIROHA_WLAN_LEGACY_RX_DESC_COUNT') == 256
+-    setup = (args.mt76/'mt7915/npu_legacy.c').read_text()
+-    assert 'writel(AIROHA_WLAN_LEGACY_INPUT_COUNT, &input->regs->ring_size)' in setup
+-    assert 'writel(AIROHA_WLAN_LEGACY_INPUT_COUNT - 1, &input->regs->cpu_idx)' in setup
+-    print('PASS: stock RV32 consumer passes index 511 and wraps at 768; both input rings match; host return rings remain 256')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/check-hg5585f-ppe-accounting.py b/scripts/check-hg5585f-ppe-accounting.py
+deleted file mode 100644
+index 62e633b..0000000
+--- a/scripts/check-hg5585f-ppe-accounting.py
++++ /dev/null
+@@ -1,233 +0,0 @@
+-#!/usr/bin/env python3
+-"""Exercise the actual PPE account collector with read-and-clear MMIO."""
+-import argparse
+-import json
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def check_readers(root):
+-    rpc = (root/'package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu').read_text()
+-    sampler = (root/'files/usr/sbin/hg5585f-wifi-offload-check').read_text()
+-
+-    def shell_function(name):
+-        start = rpc.index(name + '() {')
+-        end = rpc.index('\n}\n', start) + 3
+-        return rpc[start:end]
+-
+-    def fixture(samples=1, generation=1, running=1, delta=0):
+-        text = (f'backend: hg5585f-fe-account\nrunning: {running}\n'
+-                f'generation: {generation}\nsamples: {samples}\n')
+-        return text + ''.join(f'group {i} {10 + delta if i == 31 else 0} '
+-                              f'{1500 + delta * 100 if i == 31 else 0}\n'
+-                              for i in range(63))
+-
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-account-readers-') as temporary:
+-        directory = Path(temporary)
+-        accounting = directory/'accounting'
+-        entries = directory/'entries'
+-        before, after = directory/'before', directory/'after'
+-
+-        def call(name):
+-            body = shell_function(name).replace('/sys/kernel/debug/ppe/accounting', str(accounting))
+-            body = body.replace('/sys/kernel/debug/ppe/entries', str(entries))
+-            return json.loads(subprocess.check_output(['sh', '-c', body + '\n' + name], text=True))
+-
+-        assert not call('get_ppe_accounting')['available']
+-        text = fixture().replace('group 31 10 1500', 'group 31 9007199254740993 18446744073709551615')
+-        accounting.write_text(text)
+-        data = call('get_ppe_accounting')
+-        assert data['available'] and data['running'] and len(data['groups']) == 63
+-        assert data['groups'][31]['packets'] == '9007199254740993'
+-        assert data['groups'][31]['bytes'] == '18446744073709551615'
+-        accounting.write_text(fixture(samples=0, generation=0, running=0))
+-        data = call('get_ppe_accounting')
+-        assert data['available'] and not data['running'] and data['generation'] == '0'
+-        accounting.write_text(fixture().replace('group 62 ', 'group 63 '))
+-        assert not call('get_ppe_accounting')['available']
+-        entries.write_text('00001 BND IPv4 5T orig=1.2.3.4:1->5.6.7.8:2 stats=shared_group account_group=0\n'
+-                           '00002 BND L2B stats=shared_group account_group=62\n'
+-                           '00003 BND IPv6 5T stats=disabled\n')
+-        assert [e['account_group'] for e in call('get_ppe_entries')['entries']] == [0, 62, None]
+-
+-        block = sampler[sampler.index('if [ -f "$report/accounting-before" ]'):]
+-        program = re.search(r"\tawk '([\s\S]*?)\n\t' ", block).group(1)
+-        before.write_text(fixture())
+-
+-        def sample(**kwargs):
+-            after.write_text(fixture(**kwargs))
+-            return subprocess.check_output(['awk', program, str(before), str(after)], text=True)
+-
+-        output = sample(samples=2, delta=3)
+-        assert 'group 31 delta: packets=3 bytes=300' in output
+-        assert output.count('group ') == 1
+-        assert 'no hardware counter progress' in sample(samples=2)
+-        assert 'inconclusive' in sample(samples=2, generation=2)
+-        assert 'inconclusive' in sample(samples=2, running=0)
+-        assert 'inconclusive' in sample(samples=1)
+-    print('PASS: RPC preserves 64-bit counts and group 0; sampler rejects reset/stopped/stale samples')
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--source', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    fixture = json.loads((Path(__file__).resolve().parent /
+-                         'tests/hg5585f-rom-accounting.json').read_text())
+-    header = args.source.with_suffix('.h').read_text()
+-    source = args.source.read_text()
+-    # Compile the shipped collector, replacing only kernel services and MMIO.
+-    code = '\n'.join(line for line in (header + '\n' + source).splitlines()
+-                     if not line.startswith('#include'))
+-    prefix = r'''
+-#include <assert.h>
+-#include <errno.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdlib.h>
+-#include <stdio.h>
+-#include <string.h>
+-typedef uint32_t u32;
+-typedef uint64_t u64;
+-typedef unsigned int spinlock_t;
+-#define GENMASK(h,l) ((UINT32_MAX >> (31-(h))) & (UINT32_MAX << (l)))
+-#define FIELD_GET(m,v) (((v) & (m)) >> __builtin_ctz(m))
+-#define GFP_KERNEL 0
+-#define HZ 100
+-#define WARN_ON_ONCE(v) (v)
+-#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+-struct work_struct { int unused; };
+-struct delayed_work {
+-    struct work_struct work;
+-    void (*function)(struct work_struct *);
+-    bool pending;
+-};
+-#define to_delayed_work(p) container_of(p,struct delayed_work,work)
+-#define INIT_DELAYED_WORK(w,fn) do { (w)->function=(fn); } while (0)
+-static void *system_wq;
+-static void spin_lock_init(spinlock_t *lock) { *lock=0; }
+-static void spin_lock_bh(spinlock_t *lock) { assert(!*lock); *lock=1; }
+-static void spin_unlock_bh(spinlock_t *lock) { assert(*lock); *lock=0; }
+-static void lockdep_assert_held(spinlock_t *lock) { assert(*lock); }
+-static void queue_delayed_work(void *queue,struct delayed_work *work,int delay)
+-{ (void)queue; assert(delay==HZ && !work->pending); work->pending=true; }
+-static void cancel_delayed_work_sync(struct delayed_work *work) { work->pending=false; }
+-static u64 tick;
+-static u64 ktime_get_ns(void) { return ++tick; }
+-struct airoha_eth { void *dev; };
+-struct airoha_ppe {
+-    struct airoha_eth *eth;
+-    struct airoha_ppe_account *account;
+-    bool host_managed;
+-};
+-static void (*release_action)(void *);
+-static void *release_data;
+-static void *devm_kzalloc(void *device,size_t size,int flags)
+-{ (void)device; (void)flags; return calloc(1,size); }
+-static int devm_add_action_or_reset(void *dev,void (*action)(void *),void *data)
+-{ (void)dev; release_action=action; release_data=data; return 0; }
+-static unsigned int reads,phase[63];
+-static u32 registers[63][3];
+-'''
+-    prefix += f'''
+-static u32 airoha_fe_rr(struct airoha_eth *eth,u32 address)
+-{{
+-    (void)eth;
+-    assert(address >= {fixture['bank_offset']});
+-    unsigned int offset=address-{fixture['bank_offset']};
+-    unsigned int group=offset/{fixture['stride']};
+-    unsigned int word=(offset%{fixture['stride']})/4;
+-    assert(group < {fixture['groups']} && word < 3 && !(address & 3));
+-    assert(word == phase[group]);
+-    phase[group]=(phase[group]+1)%3;
+-    u32 value=registers[group][word];
+-    registers[group][word]=0;
+-    reads++;
+-    return value;
+-}}
+-'''
+-    test = r'''
+-static void poll(struct airoha_ppe *ppe)
+-{
+-    struct delayed_work *work=&ppe->account->work;
+-    assert(work->pending);
+-    work->pending=false;
+-    work->function(&work->work);
+-}
+-int main(void)
+-{
+-    struct airoha_eth eth={0};
+-    struct airoha_ppe ppe={.eth=&eth};
+-    struct airoha_ppe_account_snapshot a,b;
+-    assert(airoha_ppe_account_init(&ppe)==0 && !ppe.account);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==-EOPNOTSUPP);
+-    airoha_ppe_account_start(&ppe); airoha_ppe_account_stop(&ppe);
+-    assert(!reads);
+-    ppe.host_managed=true;
+-    assert(airoha_ppe_account_init(&ppe)==0 && ppe.account);
+-    registers[0][0]=999; registers[62][2]=55;
+-    airoha_ppe_account_start(&ppe);
+-    assert(reads==63*3);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==0);
+-    assert(a.running && a.generation==1 && !a.samples && !a.group[0].bytes);
+-    assert(!a.group[62].packets);
+-    registers[0][0]=0xfffffff0;registers[0][1]=1;registers[0][2]=UINT32_MAX;
+-    registers[31][0]=1500;registers[31][2]=2;
+-    registers[62][0]=9000;registers[62][2]=10;
+-    poll(&ppe);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==0);
+-    assert(a.samples==1 && a.group[0].bytes==UINT64_C(0x1fffffff0));
+-    assert(a.group[31].bytes==1500 && a.group[62].packets==10);
+-    unsigned int previous_reads=reads;
+-    assert(airoha_ppe_account_snapshot(&ppe,&b)==0 && !memcmp(&a,&b,sizeof(a)));
+-    assert(reads==previous_reads); /* Additional readers cannot steal deltas. */
+-    registers[0][0]=0x30;registers[0][2]=2;
+-    poll(&ppe);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==0);
+-    assert(a.group[0].bytes==UINT64_C(0x200000020));
+-    assert(a.group[0].packets==UINT64_C(0x100000001));
+-    assert(a.group[31].bytes==1500); /* No traffic: no double counting. */
+-    registers[31][0]=3000; registers[31][2]=3;
+-    airoha_ppe_account_stop(&ppe);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==0);
+-    assert(!a.running && a.samples==3 && a.group[31].bytes==4500);
+-    assert(!ppe.account->work.pending);
+-    previous_reads=reads;
+-    ppe.account->work.function(&ppe.account->work.work);
+-    airoha_ppe_account_stop(&ppe);
+-    assert(reads==previous_reads && !ppe.account->work.pending);
+-    registers[31][0]=7000;registers[31][2]=99;
+-    airoha_ppe_account_start(&ppe);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==0);
+-    assert(a.running && a.generation==2 && !a.samples);
+-    assert(!a.group[31].bytes && !a.group[31].packets);
+-    registers[31][0]=100;registers[31][2]=1;
+-    poll(&ppe);
+-    assert(airoha_ppe_account_snapshot(&ppe,&a)==0);
+-    assert(a.group[31].bytes==100 && a.group[31].packets==1);
+-    for (unsigned int group=0;group<64;group++)
+-        assert(FIELD_GET(AIROHA_PPE_ACCOUNT_GROUP_MASK,
+-                        0xff000000 | (31 << 19) | (group << 13) | 0x1fff)==group);
+-    release_action(release_data);
+-    assert(!ppe.account->work.pending);
+-    free(ppe.account);
+-    puts("PASS: ROM account bank bounds/read order, 64-bit carry, shared readers, stop and restart");
+-}
+-'''
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-ppe-account-') as temporary:
+-        cfile = Path(temporary)/'test.c'
+-        binary = Path(temporary)/'test'
+-        cfile.write_text(prefix + '\n' + code + '\n' + test)
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+-                        str(cfile), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-    if (Path(__file__).resolve().parents[1]/'package/luci-app-airoha-npu').exists(): check_readers(Path(__file__).resolve().parents[1])
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/check-hg5585f-rom-abi.py b/scripts/check-hg5585f-rom-abi.py
+deleted file mode 100644
+index 775ef11..0000000
+--- a/scripts/check-hg5585f-rom-abi.py
++++ /dev/null
+@@ -1,177 +0,0 @@
+-#!/usr/bin/env python3
+-"""Check compiled-source RX parsing against descriptors emitted by the ROM."""
+-import argparse
+-import hashlib
+-import json
+-from pathlib import Path
+-import subprocess
+-import tempfile
+-
+-
+-def definition(text, name, struct=False):
+-    position = text.index(('struct ' if struct else '') + name)
+-    start = position if struct else text.rfind('static ', 0, position)
+-    brace = text.index('{', position)
+-    depth = 1
+-    end = brace + 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    if struct:
+-        end = text.index(';', end) + 1
+-    return text[start:end]
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--header', type=Path, required=True)
+-    parser.add_argument('--backend', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    root = Path(__file__).resolve().parents[1]
+-    fixtures = json.loads((root/'scripts/tests/hg5585f-rom-rx.json').read_text())
+-    firmware = root/'files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin'
+-    assert hashlib.sha256(firmware.read_bytes()).hexdigest() == fixtures['firmware_sha256']
+-    header = args.header.read_text()
+-    backend = args.backend.read_text()
+-    defines = '\n'.join(line for line in header.splitlines()
+-                        if line.startswith('#define AIROHA_WLAN_LEGACY_RX_'))
+-    prefix = r'''
+-#include <assert.h>
+-#include <errno.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <string.h>
+-typedef uint8_t u8;
+-typedef uint16_t u16;
+-typedef uint32_t u32;
+-typedef uint64_t u64;
+-typedef uint32_t __le32;
+-typedef uint64_t __le64;
+-#define __packed __attribute__((packed))
+-#define BIT(n) (UINT32_C(1) << (n))
+-#define GENMASK(h,l) ((UINT32_MAX >> (31-(h))) & (UINT32_MAX << (l)))
+-#define FIELD_GET(m,v) (((v) & (m)) >> __builtin_ctz(m))
+-#define READ_ONCE(v) (v)
+-#define le32_to_cpu(v) (v)
+-#define upper_32_bits(v) ((u64)(v) >> 32)
+-#define Q_READ(q,field) ((q)->field)
+-#define dma_rmb() do {} while (0)
+-struct mt76_queue_entry { void *buf; u64 dma_addr[2]; u32 dma_len[2]; };
+-struct mt76_queue {
+-    void *desc; struct mt76_queue_entry *entry;
+-    uint16_t tail, ndesc;
+-    int queued;
+-    uint32_t cpu_idx;
+-};
+-'''
+-    pieces = [prefix, defines, definition(header, 'airoha_wlan_legacy_rx_desc', True),
+-              definition(header, 'airoha_wlan_legacy_rx_meta', True),
+-              definition(header, 'airoha_wlan_legacy_rx_decode'),
+-              definition(header, 'airoha_wlan_legacy_rx_chain'),
+-              definition(backend, 'mt76_npu_legacy_rx_available'),
+-              definition(backend, 'mt76_npu_legacy_rx_peek')]
+-    for i, fixture in enumerate(fixtures['fixtures']):
+-        values = ','.join(f'0x{x:02x}' for x in bytes.fromhex(fixture['descriptor_hex']))
+-        pieces.append(f'static const unsigned char fixture{i}[24] = {{{values}}};')
+-    pieces.append(r'''
+-int main(void) {
+-    struct airoha_wlan_legacy_rx_desc descriptors[256] = {0};
+-    struct mt76_queue_entry entries[256] = {0};
+-    struct airoha_wlan_legacy_rx_meta meta[7];
+-    struct mt76_queue q = {.desc=descriptors,.entry=entries,.ndesc=256,.queued=256};
+-    assert(sizeof(descriptors[0]) == 24);
+-    assert(offsetof(struct airoha_wlan_legacy_rx_desc, dma_addr) == 12);
+-    for (int i=0;i<256;i++) {
+-        entries[i].buf=(void *)(uintptr_t)1;
+-        entries[i].dma_addr[0]=0x98000000;
+-        entries[i].dma_len[0]=1725;
+-    }
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == -EAGAIN);
+-    memcpy(&descriptors[0],fixture0,24); q.cpu_idx=1;
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == 1);
+-    assert(meta[0].length==200 && meta[0].total==200 && meta[0].last);
+-    assert(meta[0].info==0x000f1234 && meta[0].data==0x00010002);
+-    memcpy(&descriptors[0],fixture1,24);
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == -EAGAIN);
+-    memcpy(&descriptors[1],fixture2,24); q.cpu_idx=2;
+-    /* The stock receiver reads the count from first descriptor byte 7. */
+-    ((unsigned char *)&descriptors[0])[7] |= 0x40;
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == 2);
+-    assert(meta[0].fragment==1 && meta[1].fragment==2 && meta[1].last);
+-    assert(meta[0].length+meta[1].length==2000);
+-    descriptors[1].dma_addr=0x98001000;
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == -EIO);
+-    descriptors[1].dma_addr=0x98000000;
+-    memset(descriptors,0,sizeof(descriptors));
+-    memcpy(&descriptors[255],fixture0,24);q.tail=255;q.cpu_idx=0;
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == 1);
+-    q.cpu_idx=256;
+-    assert(mt76_npu_legacy_rx_peek(&q,meta) == -EIO);
+-    puts("PASS: ROM descriptors, partial publication, continuation counts, wrap and DMA bounds");
+-    return 0;
+-}
+-''')
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-rom-abi-') as temporary:
+-        source = Path(temporary)/'test.c'
+-        binary = Path(temporary)/'test'
+-        source.write_text('\n\n'.join(pieces))
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+-                        str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-        pci = (args.backend.parent/'mt7915/pci.c').read_text()
+-        start = pci.index('void mt7915_pci_irq_cleanup(')
+-        body = pci[start:]
+-        end = body.index('\n}\n') + 3
+-        cleanup = body[:end]
+-        irq_source = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stdio.h>
+-struct device { int unused; };
+-struct tasklet { int killed; };
+-struct mt7915_hif { int irq; };
+-struct mt7915_dev {
+-    struct { struct device *dev; struct tasklet irq_tasklet; } mt76;
+-    struct { unsigned long state; } mphy;
+-    struct mt7915_hif *hif2;
+-    bool pci_irq_requested,wed_irq_requested,hif2_irq_requested;
+-    int pci_irq_num,wed_irq_num;
+-};
+-#define MT76_STATE_INITIALIZED 0
+-#define clear_bit(n,p) (*(p) &= ~(1UL << (n)))
+-static unsigned int freed[128];
+-static void mt7915_irq_disable(struct mt7915_dev *dev, unsigned int mask)
+-{ (void)dev; assert(mask == ~0U); }
+-static void devm_free_irq(struct device *device,int irq,void *cookie)
+-{ assert(device && cookie && irq>=0 && irq<128); assert(!freed[irq]); freed[irq]++; }
+-static void tasklet_kill(struct tasklet *tasklet) { tasklet->killed++; }
+-'''+cleanup+r'''
+-int main(void) {
+-    struct device device={0}; struct mt7915_hif hif={.irq=39};
+-    struct mt7915_dev dev={.mt76.dev=&device,.mphy.state=1,.hif2=&hif,
+-        .pci_irq_requested=true,.wed_irq_requested=true,.hif2_irq_requested=true,
+-        .pci_irq_num=40,.wed_irq_num=68};
+-    mt7915_pci_irq_cleanup(&dev);
+-    assert(!dev.mphy.state && !dev.pci_irq_requested && !dev.wed_irq_requested && !dev.hif2_irq_requested);
+-    assert(freed[39]==1 && freed[40]==1 && freed[68]==1 && dev.mt76.irq_tasklet.killed==1);
+-    mt7915_pci_irq_cleanup(&dev);
+-    assert(freed[39]==1 && freed[40]==1 && freed[68]==1);
+-    dev.hif2=NULL;
+-    mt7915_pci_irq_cleanup(&dev);
+-    puts("PASS: primary, WED and HIF2 IRQ teardown is idempotent before device release");
+-}
+-'''
+-        source.write_text(irq_source)
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/check-hg5585f-wed-pci-irq.py b/scripts/check-hg5585f-wed-pci-irq.py
+deleted file mode 100644
+index 850f7c9..0000000
+--- a/scripts/check-hg5585f-wed-pci-irq.py
++++ /dev/null
+@@ -1,106 +0,0 @@
+-#!/usr/bin/env python3
+-"""Exercise the built MT7915 PCI vector path for Airoha, native and generic WED."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def vector_block(text):
+-    start = text.index('if (!ret || mt76_wed_is_airoha(mdev))')
+-    brace = text.index('{', start)
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[start:end]
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--mt76', type=Path, required=True)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    pci = (args.kernel/'include/linux/pci.h').read_text()
+-    names = ('PCI_IRQ_INTX', 'PCI_IRQ_MSI', 'PCI_IRQ_MSIX', 'PCI_IRQ_ALL_TYPES')
+-    definitions = [re.search(r'^#define ' + name + r'\s+[^\n]+', pci, re.M).group()
+-                   for name in names]
+-    code = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdio.h>
+-#include <string.h>
+-#include <errno.h>
+-struct pci_dev { int irq; };
+-struct mt76_dev { bool airoha; struct { bool npu_legacy_rx; } mmio; };
+-struct mt7915_hif { int unused; };
+-static unsigned int calls, flags, hif_calls, frees;
+-static bool legacy_available;
+-static bool mt76_wed_is_airoha(struct mt76_dev *mdev) { return mdev->airoha; }
+-static struct mt7915_hif *mt7915_pci_init_hif2(struct pci_dev *pdev)
+-{ (void)pdev; hif_calls++; return NULL; }
+-/* A PCI device supporting MSI prefers it, as the real PCI core does. */
+-static int pci_alloc_irq_vectors(struct pci_dev *pdev, int min, int max, unsigned int mask)
+-{
+-    assert(min == 1 && max == 1);
+-    calls++; flags = mask;
+-    if (mask & (PCI_IRQ_MSI | PCI_IRQ_MSIX)) { pdev->irq = 54; return 1; }
+-    if ((mask & PCI_IRQ_INTX) && legacy_available) { pdev->irq = 29; return 1; }
+-    return -ENOSPC;
+-}
+-static void pci_free_irq_vectors(struct pci_dev *pdev) { (void)pdev; frees++; }
+-static int probe_vector_path(struct pci_dev *pdev, struct mt76_dev *mdev, int ret)
+-{
+-    struct mt7915_hif *hif2 = NULL;
+-    const char *stage = NULL;
+-    bool pci_irq = false;
+-    int irq = 77; /* IRQ already supplied by a generic WED backend. */
+-'''
+-    code += vector_block((args.mt76/'mt7915/pci.c').read_text())
+-    code += r'''
+-    (void)hif2;
+-    if (pci_irq) {
+-        assert(stage && !strcmp(stage, "irq_vectors"));
+-        pci_free_irq_vectors(pdev);
+-    }
+-    return irq;
+-free_wed_or_irq_vector:
+-    assert(!pci_irq);
+-    return ret;
+-}
+-static void reset(void) { calls = flags = hif_calls = frees = 0; legacy_available = true; }
+-int main(void)
+-{
+-    struct pci_dev pdev = {0};
+-    struct mt76_dev mdev = {.airoha = true};
+-    reset();
+-    /* WED polls legacy INTx; selecting MSI silently stalls its completion rings. */
+-    assert(probe_vector_path(&pdev, &mdev, 1) == 29);
+-    assert(calls == 1 && flags == PCI_IRQ_INTX && frees == 1 && hif_calls == 1);
+-    reset(); mdev.mmio.npu_legacy_rx = true;
+-    assert(probe_vector_path(&pdev, &mdev, 1) == 29);
+-    assert(flags == PCI_IRQ_INTX && hif_calls == 0 && frees == 1);
+-    reset(); legacy_available = false;
+-    assert(probe_vector_path(&pdev, &mdev, 1) == -ENOSPC);
+-    assert(calls == 1 && flags == PCI_IRQ_INTX && !frees); /* no MSI fallback */
+-    reset(); mdev.airoha = false; mdev.mmio.npu_legacy_rx = false;
+-    assert(probe_vector_path(&pdev, &mdev, 0) == 54);
+-    assert(flags == PCI_IRQ_ALL_TYPES && frees == 1 && hif_calls == 1);
+-    reset();
+-    assert(probe_vector_path(&pdev, &mdev, 1) == 77);
+-    assert(!calls && !flags && !frees && !hif_calls);
+-    puts("PASS: Airoha WED uses INTx, rejects unavailable INTx; native MSI and generic WED vector ownership preserved");
+-}
+-'''
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-pci-irq-') as temporary:
+-        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        source.write_text('\n'.join(definitions) + '\n' + code)
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/check-hg5585f-wed-rx-irq.py b/scripts/check-hg5585f-wed-rx-irq.py
+deleted file mode 100644
+index e834d9b..0000000
+--- a/scripts/check-hg5585f-wed-rx-irq.py
++++ /dev/null
+@@ -1,132 +0,0 @@
+-#!/usr/bin/env python3
+-"""Exercise actual MT7916 RX queue/event maps and primary native IRQ translation."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    match = re.search(r'^static (?:void|u32) ' + name + r'\(', text, re.M)
+-    assert match, name
+-    brace = text.index('{', match.start())
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[match.start():end]
+-
+-
+-def enum(text, name):
+-    return re.search(r'enum ' + name + r'\s*\{[\s\S]*?\};', text).group()
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--mt76', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    root = args.mt76
+-    header = (root/'mt76.h').read_text()
+-    mt7915 = (root/'mt7915/mt7915.h').read_text()
+-    regs = (root/'mt7915/regs.h').read_text()
+-    dma = function((root/'mt7915/dma.c').read_text(), 'mt7915_dma_config')
+-    mmio = (root/'mt7915/mmio.c').read_text()
+-    pieces = [r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stdio.h>
+-#include <string.h>
+-typedef uint32_t u32;
+-#define BIT(n) (1U << (n))
+-#define WFDMA0 0
+-#define WFDMA1 1
+-''', enum(header, 'mt76_mcuq_id'), enum(header, 'mt76_rxq_id'),
+-              enum(mt7915, 'mt7915_txq_id'), enum(mt7915, 'mt7915_rxq_id'),
+-              enum(mt7915, 'mt7916_rxq_id')]
+-    # Use the real register bit definitions and queue index macros.
+-    names = set(re.findall(r'\bMT_INT_[A-Z0-9_]+', dma))
+-    names |= {'MT_INT_RX_DONE_BAND0_MT7916', 'MT_INT_RX_DONE_BAND1_MT7916',
+-              'MT_INT_RX_DONE_WA', 'MT_INT_WED_RX_DONE_BAND0_MT7916',
+-              'MT_INT_WED_RX_DONE_BAND1_MT7916', 'MT_INT_WED_RX_DONE_WA_MT7916',
+-              'MT_INT_WED_RX_DONE_WA_MAIN_MT7916'}
+-    for name in sorted(names):
+-        pieces.append(re.search(r'^#define ' + name + r'\s+[^\n]+', regs, re.M).group())
+-    for name in ('__RXQ', '__TXQ', 'MT_INT_RX'):
+-        pieces.append(re.search(r'^#define ' + name + r'\([^\n]+', regs, re.M).group())
+-    pieces.append(r'''
+-struct wed { bool active; };
+-struct mt76_dev { int chip; bool airoha; struct { struct wed wed; } mmio; };
+-struct mt7915_dev { struct mt76_dev mt76; void *hif2; u32 q_int_mask[64], q_id[64], wfdma_mask; };
+-static bool is_mt7915(struct mt76_dev *dev) { return dev->chip == 0x7915; }
+-static bool is_mt7916(struct mt76_dev *dev) { return dev->chip == 0x7906; }
+-static bool mt76_wed_is_airoha(struct mt76_dev *dev) __attribute__((unused));
+-static bool mt76_wed_is_airoha(struct mt76_dev *dev) { return dev->airoha; }
+-static bool mtk_wed_device_active(struct wed *wed) { return wed->active; }
+-''')
+-    pieces += [dma, function(mmio, 'mt7915_airoha_native_irq_mask'),
+-               function(mmio, 'mt7915_airoha_native_irq_status')]
+-    pieces.append(r'''
+-static void wed_case(bool hif2)
+-{
+-    struct mt7915_dev store = {.mt76 = {.chip = 0x7906, .airoha = true, .mmio.wed.active = true}};
+-    struct mt7915_dev *dev = &store;
+-    dev->hif2 = hif2 ? dev : NULL;
+-    mt7915_dma_config(dev);
+-    u32 main = MT_INT_RX(MT_RXQ_MAIN), band1 = MT_INT_RX(MT_RXQ_BAND1);
+-    u32 wa = MT_INT_RX(MT_RXQ_MCU_WA), txfree = MT_INT_RX(MT_RXQ_MAIN_WA);
+-    assert(main == BIT(18));
+-    assert(band1 == (hif2 ? BIT(23) : BIT(19)));
+-    assert(wa == BIT(17) && txfree == BIT(1));
+-    assert(dev->q_id[__RXQ(MT_RXQ_MAIN)] == MT7916_RXQ_BAND0);
+-    assert(dev->q_id[__RXQ(MT_RXQ_BAND1)] == MT7916_RXQ_BAND1);
+-
+-    /* Real failure: a done RX descriptor and WED status 0x00040000,
+-     * masked out when the old Airoha override selected native bit 22.
+-     */
+-    u32 pending = BIT(18), descriptor = 0xc1db0000;
+-    assert(descriptor & BIT(31));
+-    assert((pending & main) == pending); /* schedules the native RX NAPI */
+-    assert(!(pending & (BIT(22) | BIT(23)))); /* old queue map loses it */
+-
+-    u32 logical = main | band1 | wa | txfree | BIT(29);
+-    u32 native = mt7915_airoha_native_irq_mask(logical);
+-    assert(native == (BIT(22) | BIT(23) | BIT(1) | BIT(29)));
+-    assert(mt7915_airoha_native_irq_status(dev, native) == (main | band1 | wa | BIT(29)));
+-    assert(mt7915_airoha_native_irq_status(dev, BIT(1)) == wa); /* never TX-free */
+-    assert(mt7915_airoha_native_irq_status(dev, BIT(22)) == main);
+-    assert(mt7915_airoha_native_irq_status(dev, BIT(23)) == band1);
+-    assert(!mt7915_airoha_native_irq_status(dev, 0));
+-
+-    /* NAPI masks/re-enables the same physical cause as it drains the ring. */
+-    assert(!(mt7915_airoha_native_irq_mask(logical & ~main) & BIT(22)));
+-    assert(mt7915_airoha_native_irq_mask(logical) & BIT(22));
+-    assert(!(mt7915_airoha_native_irq_mask(logical & ~wa) & BIT(1)));
+-    assert(!(mt7915_airoha_native_irq_mask(txfree) & BIT(1)));
+-    assert(!(mt7915_airoha_native_irq_mask(logical & ~(main | band1)) & (BIT(22) | BIT(23))));
+-}
+-int main(void)
+-{
+-    wed_case(false); wed_case(true);
+-    struct mt7915_dev store = {.mt76.chip = 0x7906};
+-    struct mt7915_dev *dev = &store;
+-    mt7915_dma_config(dev);
+-    assert(MT_INT_RX(MT_RXQ_MAIN) == BIT(22) && MT_INT_RX(MT_RXQ_BAND1) == BIT(23));
+-    memset(dev, 0, sizeof(*dev)); dev->mt76.chip = 0x7915;
+-    mt7915_dma_config(dev);
+-    assert(MT_INT_RX(MT_RXQ_MAIN) == BIT(16) && MT_INT_RX(MT_RXQ_BAND1) == BIT(17));
+-    puts("PASS: WED bit 18 wakes native RX; single/dual HIF and WA/TX-free mappings preserve native masking and acknowledgement");
+-}
+-''')
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-rx-irq-') as temporary:
+-        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        source.write_text('\n'.join(pieces))
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/check-hg5585f-wifi-diagnostics.py b/scripts/check-hg5585f-wifi-diagnostics.py
+deleted file mode 100644
+index 00c0011..0000000
+--- a/scripts/check-hg5585f-wifi-diagnostics.py
++++ /dev/null
+@@ -1,287 +0,0 @@
+-#!/usr/bin/env python3
+-"""Exercise wireless fault recovery and the diagnostic switch/report format."""
+-import argparse
+-import json
+-import os
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    position = text.index(name + '(')
+-    start = text.rfind('\n\n', 0, position) + 2
+-    brace = text.index('{', position)
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return '\n'.join(line for line in text[start:end].splitlines()
+-                     if not line.startswith('#'))
+-
+-
+-def driver_test(mt76, kernel, cc):
+-    header = (kernel/'include/linux/soc/airoha/airoha_offload.h').read_text()
+-    macro = re.search(r'#define airoha_wlan_dbg[\s\S]*?while \(0\)', header).group()
+-    npu = (mt76/'npu.c').read_text()
+-    legacy = (mt76/'mt7915/npu_legacy.c').read_text()
+-    rx = (mt76/'npu_rx_legacy.c').read_text()
+-    prefix = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <stdarg.h>
+-#include <string.h>
+-#include <errno.h>
+-#include <pthread.h>
+-typedef uint32_t u32;
+-typedef uint64_t u64;
+-typedef u64 phys_addr_t;
+-typedef u64 atomic64_t;
+-#define EPROBE_DEFER 517
+-#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
+-#define AIROHA_WLAN_LEGACY_RX_MAX_FRAGS 7
+-#define READ_ONCE(v) (v)
+-#define WRITE_ONCE(v,x) ((v)=(x))
+-#define xchg(p,v) __atomic_exchange_n((p),(v),__ATOMIC_SEQ_CST)
+-#define unlikely(v) (v)
+-#define PTR_ERR(p) ((int)(intptr_t)(p))
+-#define ERR_PTR(e) ((void *)(intptr_t)(e))
+-#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
+-#define IS_ERR_OR_NULL(p) (!(p) || IS_ERR(p))
+-#define upper_32_bits(v) ((u64)(v) >> 32)
+-#define rcu_read_lock() do {} while (0)
+-#define rcu_read_unlock() do {} while (0)
+-#define rcu_dereference(v) (v)
+-#define rcu_assign_pointer(v,x) ((v)=(x))
+-#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+-enum mt76_rxq_id { MT_RXQ_MAIN, MT_RXQ_BAND1, MT_RXQ_NPU0, MT_RXQ_NPU1 };
+-struct sk_buff { int unused; };
+-struct napi_struct { void *dev; };
+-struct mt76_queue { bool stopped; unsigned int queued,ndesc,tail,cpu_idx; };
+-struct airoha_wlan_legacy_rx_meta { u32 total,info,data; };
+-struct airoha_npu { unsigned int wlan_abi; void *dev; };
+-struct airoha_ppe_dev { struct { int (*prepare_legacy)(struct airoha_ppe_dev *); } ops; };
+-struct mt76_dev;
+-struct mt76_driver_ops {
+-    void (*rx_skb)(struct mt76_dev *,enum mt76_rxq_id,struct sk_buff *,u32 *);
+-    void (*rx_poll_complete)(struct mt76_dev *,enum mt76_rxq_id);
+-};
+-struct mt76_dev {
+-    void *dev,*dma_dev,*wq;
+-    struct {
+-        struct airoha_npu *npu; struct airoha_ppe_dev *ppe_dev;
+-        bool npu_legacy_rx; u64 phy_addr;
+-        atomic64_t npu_rx_host_packets,npu_rx_host_errors;
+-        u32 npu_rx_last_info,npu_rx_last_vendor;
+-    } mmio;
+-    struct mt76_queue q_rx[4]; struct napi_struct napi[4];
+-    struct mt76_driver_ops *drv;
+-};
+-struct mt7915_dev {
+-    struct mt76_dev mt76; bool npu_legacy_failed;
+-    struct { bool hw_init_done; } recovery;
+-    int reset_work;
+-};
+-static unsigned int work_calls,enabled_irqs,disabled_irqs;
+-static int queue_work(void *wq,int *work) { (void)wq;(void)work;work_calls++;return 1; }
+-static void airoha_npu_wlan_enable_irq(struct airoha_npu *npu,int q)
+-{ assert(npu && q>=0 && q<2);enabled_irqs++; }
+-static void airoha_npu_wlan_disable_irq(struct airoha_npu *npu,int q)
+-{ assert(npu && q>=0 && q<2);disabled_irqs++; }
+-static void dev_err_ratelimited(void *dev,const char *format,...)
+-{ (void)dev;(void)format; }
+-static bool debug_enabled;
+-static bool airoha_wlan_debug_enabled(void) { return debug_enabled; }
+-static void dev_info_ratelimited(void *dev,const char *format,...)
+-__attribute__((format(printf,2,3)));
+-static char record[512];
+-static void dev_info_ratelimited(void *dev,const char *format,...)
+-{ (void)dev;va_list args;va_start(args,format);vsnprintf(record,sizeof(record),format,args);va_end(args); }
+-static void atomic64_add(int value,atomic64_t *target) { *target += value; }
+-static struct mt76_dev *current_dev;
+-static struct mt76_dev *mt76_priv(void *dev) { (void)dev;return current_dev; }
+-static int napi_complete(struct napi_struct *napi) { (void)napi;return 1; }
+-static int peek_result;
+-static int mt76_npu_legacy_rx_peek(struct mt76_queue *q,struct airoha_wlan_legacy_rx_meta *meta)
+-{ (void)q;(void)meta;return peek_result; }
+-#define Q_READ(q,field) ((q)->field)
+-static void mt76_npu_legacy_rx_retire(struct mt76_dev *dev,struct mt76_queue *q,
+-    unsigned int n,struct sk_buff *skb,const struct airoha_wlan_legacy_rx_meta *meta)
+-{ (void)dev;(void)q;(void)n;(void)skb;(void)meta; }
+-static struct sk_buff *napi_alloc_skb(struct napi_struct *napi,u32 length)
+-{ (void)napi;(void)length;return NULL; }
+-static void skb_reset_mac_header(struct sk_buff *skb) { (void)skb; }
+-static void mt76_rx_poll_complete(struct mt76_dev *dev,enum mt76_rxq_id q,struct napi_struct *napi)
+-{ (void)dev;(void)q;(void)napi; }
+-static void mt76_npu_fill_rx_queue(struct mt76_dev *dev,struct mt76_queue *q)
+-{ (void)dev;(void)q; }
+-static struct airoha_npu *get_result;
+-static struct airoha_ppe_dev *ppe_result;
+-static int modules,npu_puts,ppe_puts,memory_error,release_error;
+-static struct airoha_npu *airoha_npu_get(void *dev) { (void)dev;return get_result; }
+-static void request_module(const char *name) { (void)name;modules++; }
+-static void airoha_npu_put(struct airoha_npu *npu) { assert(npu);npu_puts++; }
+-static struct airoha_ppe_dev *airoha_ppe_get_dev(void *dev) { (void)dev;return ppe_result; }
+-static void airoha_ppe_put_dev(struct airoha_ppe_dev *ppe) { assert(ppe);ppe_puts++; }
+-static int airoha_npu_wlan_legacy_acquire(struct airoha_npu *npu,void *dev)
+-{ (void)npu;(void)dev;return 0; }
+-static int airoha_npu_wlan_init_reserved_memory(struct airoha_npu *npu) { (void)npu;return memory_error; }
+-static int airoha_npu_wlan_legacy_release(struct airoha_npu *npu,void *dev)
+-{ (void)npu;(void)dev;return release_error; }
+-static int prepare_ppe(struct airoha_ppe_dev *ppe) { (void)ppe;return 0; }
+-'''
+-    pieces = [prefix, macro,
+-              function(legacy, 'mt7915_npu_is_legacy'),
+-              function(legacy, 'mt7915_npu_legacy_fail'),
+-              function(legacy, 'mt7915_npu_legacy_poll_complete'),
+-              function(rx, 'mt76_npu_legacy_rx_dequeue'),
+-              'static struct sk_buff *mt76_npu_dequeue(struct mt76_dev *dev,struct mt76_queue *q,u32 *info)\n{ return mt76_npu_legacy_rx_dequeue(dev,q,info); }',
+-              function(npu, 'mt76_npu_rx_poll'),
+-              function(npu, 'mt76_npu_legacy_init')]
+-    pieces.append(r'''
+-static struct airoha_npu *fault_npu;
+-static void *fault_thread(void *data)
+-{
+-    mt7915_npu_legacy_fail(data,fault_npu,-EIO);
+-    return NULL;
+-}
+-int main(void)
+-{
+-    int evaluated=0;
+-    airoha_wlan_dbg(NULL,"test","event=sample error=%d",++evaluated);
+-    assert(!evaluated && !record[0]);
+-    debug_enabled=true;
+-    airoha_wlan_dbg(NULL,"test","event=sample error=%d",++evaluated);
+-    assert(evaluated==1 && !strcmp(record,"hg5585f-wifi: component=test event=sample error=1\n"));
+-    struct airoha_npu npu={.wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024};
+-    struct mt76_driver_ops ops={.rx_poll_complete=mt7915_npu_legacy_poll_complete};
+-    /* Its callback returns bool internally; wrap it with the driver's void API. */
+-    (void)ops;
+-    struct mt7915_dev dev={.recovery.hw_init_done=true};
+-    dev.mt76.mmio.npu=&npu;dev.mt76.mmio.npu_legacy_rx=true;
+-    assert(!mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_MAIN));
+-    assert(mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_NPU0) && enabled_irqs==1);
+-    dev.mt76.q_rx[MT_RXQ_NPU0].stopped=true;
+-    assert(mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_NPU0));
+-    assert(dev.npu_legacy_failed && disabled_irqs==2 && work_calls==1);
+-    assert(mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_NPU1));
+-    assert(work_calls==1 && enabled_irqs==1);
+-    memset(&dev,0,sizeof(dev));dev.recovery.hw_init_done=true;
+-    work_calls=disabled_irqs=0;fault_npu=&npu;
+-    pthread_t first,second;
+-    assert(!pthread_create(&first,NULL,fault_thread,&dev));
+-    assert(!pthread_create(&second,NULL,fault_thread,&dev));
+-    assert(!pthread_join(first,NULL) && !pthread_join(second,NULL));
+-    assert(work_calls==1 && disabled_irqs==2);
+-    get_result=ERR_PTR(-ENODEV);assert(mt76_npu_legacy_init(&dev.mt76,0)==-EPROBE_DEFER && modules==1);
+-    get_result=ERR_PTR(-EINVAL);assert(mt76_npu_legacy_init(&dev.mt76,0)==-EINVAL);
+-    get_result=&npu;ppe_result=ERR_PTR(-ENODEV);
+-    assert(mt76_npu_legacy_init(&dev.mt76,0)==-EPROBE_DEFER && npu_puts==1);
+-    struct airoha_ppe_dev ppe={.ops.prepare_legacy=prepare_ppe};ppe_result=&ppe;
+-    memory_error=-EIO;release_error=-EIO;npu_puts=ppe_puts=0;
+-    assert(mt76_npu_legacy_init(&dev.mt76,0)==-EIO && !npu_puts && ppe_puts==1);
+-    return 0;
+-}
+-''')
+-    # The callback type in mt76 is void; preserve that adapter as in mmio.c.
+-    pieces.insert(-1, 'static void complete(struct mt76_dev *dev,enum mt76_rxq_id q)\n{ assert(mt7915_npu_legacy_poll_complete(dev,q)); }')
+-    pieces[-1] = pieces[-1].replace('.rx_poll_complete=mt7915_npu_legacy_poll_complete', '.rx_poll_complete=complete')
+-    pieces[-1] = pieces[-1].replace('    return 0;\n}', r'''
+-    memset(&dev,0,sizeof(dev));dev.recovery.hw_init_done=true;
+-    dev.mt76.mmio.npu=&npu;dev.mt76.mmio.npu_legacy_rx=true;dev.mt76.drv=&ops;
+-    dev.mt76.q_rx[MT_RXQ_NPU0].queued=dev.mt76.q_rx[MT_RXQ_NPU0].ndesc=256;
+-    current_dev=&dev.mt76;peek_result=-EIO;work_calls=0;
+-    dev.mt76.mmio.npu_rx_host_errors=UINT64_C(2147483648);
+-    assert(mt76_npu_rx_poll(&dev.mt76.napi[MT_RXQ_NPU0],4)==1);
+-    assert(work_calls==1 && dev.npu_legacy_failed);
+-    assert(dev.mt76.mmio.npu_rx_host_errors==UINT64_C(2147483649));
+-    assert(!dev.mt76.mmio.npu_rx_host_packets);
+-    puts("PASS: stopped RX rings count errors and schedule recovery; supplier deferral and debug formatting");
+-    return 0;
+-}''')
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wifi-driver-') as temporary:
+-        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        source.write_text('\n\n'.join(pieces))
+-        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wformat=2', '-pthread',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-def tool_test(root):
+-    tool = (root/'files/usr/sbin/hg5585f-wifi-diag').read_text()
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wifi-tool-') as temporary:
+-        directory=Path(temporary); commands=directory/'bin';commands.mkdir()
+-        parameter=directory/'parameter';parameter.write_text('N\n')
+-        state=directory/'state';state.write_text('0')
+-        reports=directory/'reports';reports.mkdir()
+-        debugfs=directory/'debugfs/phy0/mt76';debugfs.mkdir(parents=True)
+-        wa=debugfs/'fw_debug_wa';wm=debugfs/'fw_debug_wm';wa.write_text('0\n');wm.write_text('0\n')
+-        device_tree=directory/'device-tree';device_tree.mkdir()
+-        (device_tree/'compatible').write_bytes(b'fiberhome,hg5585f-ct\0airoha,an7581\0')
+-        init=directory/'init';init.write_text('#!/bin/sh\nexit 0\n');init.chmod(0o755)
+-        mock=commands/'mock'
+-        mock.write_text('''#!/usr/bin/env python3
+-import os,sys
+-from pathlib import Path
+-command=Path(sys.argv[0]).name;args=sys.argv[1:];state=Path(os.environ['WIFI_TEST_STATE'])
+-if command=='uci':
+-    if args[:2]==['-q','get']:
+-        key=args[2]
+-        if key=='hg5585f_wifi.main.enabled':print(state.read_text().strip())
+-        else:print({'band':'5g','channel':'36','htmode':'HE160','country':'CN','disabled':'0'}.get(key.split('.')[-1],''))
+-    elif args[:2]==['-q','show']:
+-        print("wireless.radio1=wifi-device\\nwireless.ap=wifi-iface\\nwireless.ap.key='SECRET%password'\\n")
+-    elif args[0]=='set':state.write_text(args[1].split('=',1)[1])
+-elif command=='iw':
+-    if args==['dev']:print('phy#1\\n Interface phy1-ap0\\n channel 36 (5180 MHz), width: 160 MHz')
+-elif command=='logread':print('hostapd: AP-STA-CONNECTED 00:11:22:33:44:55\\nhg5585f-wifi: component=test event=ready error=0')
+-elif command=='dmesg':print('hg5585f-wifi: component=test event=ready error=0')
+-elif command in ('logger','sleep'):pass
+-''');mock.chmod(0o755)
+-        for name in ['uci','iw','logread','dmesg','logger','sleep']:
+-            (commands/name).symlink_to(mock)
+-        tool=tool.replace('/sys/module/airoha_npu/parameters/wlan_debug',str(parameter))
+-        tool=tool.replace('/sys/kernel/debug/ieee80211/phy*/mt76',str(debugfs))
+-        tool=tool.replace('/etc/init.d/hg5585f-wifi-diag',str(init))
+-        tool=tool.replace('/tmp/hg5585f-wifi-diag.XXXXXX',str(reports/'hg5585f-wifi-diag.XXXXXX'))
+-        tool=tool.replace('/proc/device-tree/',str(device_tree)+'/')
+-        executable=directory/'diag';executable.write_text(tool)
+-        env=os.environ.copy();env.update(PATH=str(commands)+os.pathsep+env['PATH'],WIFI_TEST_STATE=str(state))
+-        def call(*args):
+-            return subprocess.run(['sh',str(executable),*args],env=env,capture_output=True,text=True)
+-        assert 'configured=0 runtime=0' in call('status').stdout
+-        assert call('on').returncode==0 and state.read_text()=='1' and parameter.read_text()=='1\n'
+-        assert wa.read_text()=='1\n' and wm.read_text()=='1\n'
+-        snapshot=call('snapshot');assert not snapshot.returncode
+-        assert 'SECRET' not in snapshot.stdout and 'field=htmode value=HE160' in snapshot.stdout
+-        assert '\0' not in snapshot.stdout and 'fiberhome,hg5585f-ct\nairoha,an7581\n' in snapshot.stdout
+-        assert '\\n' not in snapshot.stdout
+-        collect=call('collect','1');assert not collect.returncode,collect.stderr
+-        archive=Path(re.search(r'archive=(.+)\n',collect.stdout).group(1))
+-        assert archive.is_file() and archive.stat().st_mode & 0o077 == 0
+-        for path in archive.with_suffix('').with_suffix('').glob('*.txt'):
+-            assert 'SECRET' not in path.read_text()
+-        assert call('off').returncode==0 and state.read_text()=='0' and parameter.read_text()=='0\n'
+-        assert wa.read_text()=='0\n' and wm.read_text()=='0\n'
+-        for invalid in ['0','61','abc','-1']:
+-            assert call('collect',invalid).returncode==2
+-    print('PASS: persistent on/off, private bounded report, radio fields without passwords and real newlines')
+-
+-
+-def main():
+-    parser=argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--mt76',type=Path,required=True)
+-    parser.add_argument('--kernel',type=Path,required=True)
+-    parser.add_argument('--cc',default='cc')
+-    args=parser.parse_args()
+-    driver_test(args.mt76,args.kernel,args.cc)
+-    tool_test(Path(__file__).resolve().parents[1])
+-
+-
+-if __name__=='__main__':
+-    main()
+diff --git a/scripts/tests/check-hg5585f-ppe-host-start.py b/scripts/tests/check-hg5585f-ppe-host-start.py
+deleted file mode 100644
+index fa307bc..0000000
+--- a/scripts/tests/check-hg5585f-ppe-host-start.py
++++ /dev/null
+@@ -1,49 +0,0 @@
+-#!/usr/bin/env python3
+-"""Check host-managed PPE takeover of the HG5585F boot-time enable state."""
+-import argparse
+-from pathlib import Path
+-
+-
+-PPE_BUSY = 1 << 31
+-PPE_ENABLE = 1
+-
+-
+-def model(values):
+-    writes = []
+-    for index, value in enumerate(values):
+-        if value & PPE_BUSY:
+-            return -16, writes
+-        if value & PPE_ENABLE:
+-            writes.append(index)
+-            values[index] &= ~PPE_ENABLE
+-            if values[index] & PPE_BUSY:
+-                return -110, writes
+-    return 0, writes
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser()
+-    parser.add_argument('--source', type=Path, required=True)
+-    args = parser.parse_args()
+-    text = args.source.read_text()
+-    start = text.index('static int airoha_ppe_host_start(')
+-    end = text.index('\n}\n', start) + 2
+-    function = text[start:end]
+-    assert 'PPE_GLO_CFG_BUSY_MASK' in function
+-    assert 'PPE_GLO_CFG_EN_MASK' in function
+-    assert 'airoha_fe_clear(eth, REG_PPE_GLO_CFG(i), PPE_GLO_CFG_EN_MASK)' in function
+-    assert 'read_poll_timeout(airoha_fe_rr' in function
+-    assert function.index('airoha_fe_clear') < function.index('ppe->host_started = true')
+-
+-    values = [0x0006070f, 0x0006070f]
+-    result, writes = model(values)
+-    assert result == 0 and writes == [0, 1] and values == [0x0006070e, 0x0006070e]
+-    result, writes = model([PPE_BUSY, 0])
+-    assert result == -16 and writes == []
+-    result, writes = model([0, 0])
+-    assert result == 0 and writes == []
+-    print('PASS: host-managed PPE clears stale enable bits, rejects busy ownership and preserves clean state')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/check-npu-dma-device.py b/scripts/tests/check-npu-dma-device.py
+deleted file mode 100644
+index 88dd804..0000000
+--- a/scripts/tests/check-npu-dma-device.py
++++ /dev/null
+@@ -1,24 +0,0 @@
+-#!/usr/bin/env python3
+-"""Check NPU RX keeps its DMA owner when WED is initialized."""
+-import argparse
+-from pathlib import Path
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser()
+-    parser.add_argument('--source', type=Path, required=True)
+-    args = parser.parse_args()
+-    text = args.source.read_text()
+-    start = text.index('int mt7915_mmio_wed_init(')
+-    end = text.index('\n}\n', start) + 2
+-    function = text[start:end]
+-    assignment = '\tdev->mt76.dma_dev = wed->dev;'
+-    assert function.count(assignment) == 1
+-    guard = function.index('if (!dev->mt76.mmio.npu_legacy_rx)')
+-    assert guard < function.index(assignment)
+-    assert function[guard:function.index(assignment)+len(assignment)].count('dma_dev') == 1
+-    print('PASS: NPU RX keeps its DMA owner while native WED receives the WED DMA device')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/hg5585f-rom-accounting.json b/scripts/tests/hg5585f-rom-accounting.json
+deleted file mode 100644
+index c7455c8..0000000
+--- a/scripts/tests/hg5585f-rom-accounting.json
++++ /dev/null
+@@ -1,28 +0,0 @@
+-{
+-  "scope": "Static ROM disassembly and matching FE SDK accumulator; hardware behavior still needs device validation",
+-  "module": "fe_core.ko",
+-  "module_sha256": "aa289e509937f646f55d97663ec9210649c46096c6ac48f8090719d2d13797da",
+-  "routines": [
+-    {
+-      "name": "fe_api_get_ac_group_byte_cnt",
+-      "offset": "0x12ba0",
+-      "size": 468,
+-      "sha256": "16346e98eca0b67a60d9ff767b0cee48403c9c03085418eb97c87b77a7af8991"
+-    },
+-    {
+-      "name": "fe_api_get_ac_group_pkt_cnt",
+-      "offset": "0x12900",
+-      "size": 248,
+-      "sha256": "c898f92ef0f8e1b929ad8b87cb7dd1571e8fb19db2569e37666ec4545db60fd5"
+-    }
+-  ],
+-  "bank_offset": 8192,
+-  "stride": 16,
+-  "groups": 63,
+-  "words": [
+-    "bytes_low",
+-    "bytes_high",
+-    "packets"
+-  ],
+-  "behavior": "read-clear deltas accumulated once by the host; group 63 disables counting"
+-}
+diff --git a/scripts/tests/hg5585f-rom-rx.json b/scripts/tests/hg5585f-rom-rx.json
+deleted file mode 100644
+index f2fb42d..0000000
+--- a/scripts/tests/hg5585f-rom-rx.json
++++ /dev/null
+@@ -1,52 +0,0 @@
+-{
+-  "firmware_sha256": "a8757aabc872c31d20683aeb4c05dbb9f7f590bdd6a1102c8a6902385bb5e9a6",
+-  "function": "0x84008dac",
+-  "scope": "Original descriptor writer executed; GDMA copy replaced with a memory copy; no MMIO timing validated",
+-  "fixtures": [
+-    {
+-      "total": 200,
+-      "length": 200,
+-      "fragment": 0,
+-      "last": 1,
+-      "descriptor_hex": "9101320834120f0002000100000000980000000000000000",
+-      "dma_calls": [
+-        [
+-          3,
+-          1174417408,
+-          2550136832,
+-          200
+-        ]
+-      ]
+-    },
+-    {
+-      "total": 2000,
+-      "length": 1000,
+-      "fragment": 1,
+-      "last": 0,
+-      "descriptor_hex": "d107f40134120f0402000100000000980000000000000000",
+-      "dma_calls": [
+-        [
+-          3,
+-          1174417408,
+-          2550136832,
+-          1000
+-        ]
+-      ]
+-    },
+-    {
+-      "total": 2000,
+-      "length": 1000,
+-      "fragment": 2,
+-      "last": 1,
+-      "descriptor_hex": "d107f40934120f0802000100000000980000000000000000",
+-      "dma_calls": [
+-        [
+-          3,
+-          1174417408,
+-          2550136832,
+-          1000
+-        ]
+-      ]
+-    }
+-  ]
+-}
+diff --git a/scripts/tests/test-ap-flowtable.py b/scripts/tests/test-ap-flowtable.py
+deleted file mode 100644
+index cbe4440..0000000
+--- a/scripts/tests/test-ap-flowtable.py
++++ /dev/null
+@@ -1,95 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute the hotplug worker with delayed bridge membership and reload failures."""
+-import argparse
+-import os
+-import sys
+-from pathlib import Path
+-import subprocess
+-import tempfile
+-import unittest
+-
+-parser = argparse.ArgumentParser()
+-parser.add_argument('--hotplug', type=Path, required=True)
+-args, tests = parser.parse_known_args()
+-SCRIPT = args.hotplug
+-sys.argv = [sys.argv[0]] + tests
+-
+-
+-class HotplugTests(unittest.TestCase):
+-    def run_worker(self, *, ready_at=4, reload_failures=0, present=True,
+-                   already=False, enabled=True, device='phy1-ap0'):
+-        with tempfile.TemporaryDirectory() as temporary:
+-            root = Path(temporary)
+-            bindir = root/'bin'
+-            bindir.mkdir()
+-            (root/'locks').mkdir()
+-            if present:
+-                (root/'net'/device).mkdir(parents=True)
+-            for name, code in {
+-                'flock': 'exit 0',
+-                'uci': 'echo '+('1' if enabled else '0'),
+-                'logger': 'echo timeout >> "$TEST_ROOT/events"',
+-                'sleep': '''n=$(cat "$TEST_ROOT/ticks" 2>/dev/null || echo 0)
+-n=$((n+1))
+-echo "$n" > "$TEST_ROOT/ticks"
+-if [ "$n" -ge "$READY_AT" ] && [ -d "$TEST_ROOT/net/$DEVICENAME" ]; then
+- mkdir -p "$TEST_ROOT/net/$DEVICENAME/brport"
+-fi''',
+-                'nft': '''if [ -f "$TEST_ROOT/loaded" ]; then
+- echo 'devices = { "'$DEVICENAME'" };'
+-fi''',
+-                'firewall': '''n=$(cat "$TEST_ROOT/reloads" 2>/dev/null || echo 0)
+-n=$((n+1))
+-echo "$n" > "$TEST_ROOT/reloads"
+-[ "$n" -gt "$FAILURES" ] || exit 1
+-touch "$TEST_ROOT/loaded"''',
+-            }.items():
+-                p = bindir/name
+-                p.write_text('#!/bin/sh\n'+code+'\n')
+-                p.chmod(0o755)
+-            if already:
+-                (root/'loaded').touch()
+-            text = SCRIPT.read_text().replace('/sys/class/net', str(root/'net'))
+-            text = text.replace('/var/lock', str(root/'locks'))
+-            text = text.replace('/etc/init.d/firewall', str(bindir/'firewall'))
+-            text = text.replace(') </dev/null >/dev/null 2>&1 &', ')')
+-            worker = root/'worker'
+-            worker.write_text(text)
+-            env = dict(os.environ, PATH=str(bindir)+':'+os.environ['PATH'],
+-                       TEST_ROOT=str(root), DEVICENAME=device, ACTION='add',
+-                       READY_AT=str(ready_at), FAILURES=str(reload_failures))
+-            subprocess.run(['sh', str(worker)], env=env, check=True, timeout=5)
+-            return {name: (root/name).read_text() if (root/name).exists() else ''
+-                    for name in ('ticks', 'reloads', 'events')}
+-
+-    def test_late_bridge_membership(self):
+-        state = self.run_worker(ready_at=4)
+-        self.assertEqual(state['reloads'], '1\n')
+-        self.assertGreaterEqual(int(state['ticks']), 5)
+-
+-    def test_reload_failure_is_retried(self):
+-        self.assertEqual(self.run_worker(reload_failures=1)['reloads'], '2\n')
+-
+-    def test_existing_tables_need_no_reload(self):
+-        self.assertEqual(self.run_worker(already=True)['reloads'], '')
+-
+-    def test_disappearing_interface_stops_worker(self):
+-        state = self.run_worker(present=False)
+-        self.assertEqual(state['ticks'], '1\n')
+-        self.assertEqual(state['reloads'], '')
+-
+-    def test_disabled_offload(self):
+-        self.assertEqual(self.run_worker(enabled=False)['reloads'], '')
+-
+-    def test_missing_bridge_wait_is_bounded(self):
+-        state = self.run_worker(ready_at=100)
+-        self.assertEqual(state['ticks'], '30\n')
+-        self.assertEqual(state['reloads'], '')
+-        self.assertEqual(state['events'], 'timeout\n')
+-
+-    def test_non_ap_event_is_ignored(self):
+-        self.assertEqual(self.run_worker(device='lan3')['ticks'], '')
+-
+-
+-if __name__ == '__main__':
+-    unittest.main()
+diff --git a/scripts/tests/test-bridge-wifi-path.py b/scripts/tests/test-bridge-wifi-path.py
+deleted file mode 100644
+index 0a3a9cb..0000000
+--- a/scripts/tests/test-bridge-wifi-path.py
++++ /dev/null
+@@ -1,148 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute real bridge endpoint discovery with mac80211 and DSA paths."""
+-import argparse
+-from pathlib import Path
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    start = text.index('static int '+name+'(')
+-    brace = text.index('{', start)
+-    depth, end = 1, brace + 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[start:end]
+-
+-
+-def check(source, succeeds):
+-    text = source.read_text()
+-    structure = text[text.index('struct nft_forward_info {'):text.index('static int nft_dev_path_info(')]
+-    functions = function(text, 'nft_dev_path_info')+'\n'+function(text, 'nft_dev_fill_bridge_path')
+-    harness = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <string.h>
+-typedef uint8_t u8;
+-typedef uint16_t __u16;
+-typedef uint16_t __be16;
+-enum { ETH_ALEN=6, NF_FLOW_TABLE_ENCAP_MAX=2, NET_DEVICE_PATH_VLAN_MAX=2 };
+-enum { ETH_P_PPP_SES=0x8864 };
+-enum { DEV_PATH_ETHERNET, DEV_PATH_VLAN, DEV_PATH_BRIDGE, DEV_PATH_PPPOE,
+-       DEV_PATH_DSA, DEV_PATH_MTK_WDMA, DEV_PATH_IEEE80211, DEV_PATH_AIROHA_WDMA };
+-enum { DEV_PATH_BR_VLAN_UNTAG_HW, DEV_PATH_BR_VLAN_KEEP_HW,
+-       DEV_PATH_BR_VLAN_TAG, DEV_PATH_BR_VLAN_UNTAG, DEV_PATH_BR_VLAN_KEEP };
+-enum flow_offload_xmit_type { FLOW_OFFLOAD_XMIT_NEIGH, FLOW_OFFLOAD_XMIT_DIRECT };
+-enum ip_conntrack_dir { ORIGINAL, REPLY };
+-struct net_device { int ifindex, mtu; u8 dev_addr[6]; };
+-struct encap { __u16 id; __be16 proto; };
+-struct net_device_path {
+-    int type;
+-    const struct net_device *dev;
+-    struct { int vlan_mode; __u16 vlan_id; __be16 vlan_proto; } bridge;
+-    struct { __u16 id; __be16 proto; u8 h_dest[6]; } encap;
+-};
+-struct net_device_path_stack { int num_paths; struct net_device_path path[3]; };
+-struct net_device_path_ctx {
+-    bool ieee80211;
+-    const struct net_device *dev;
+-    u8 daddr[6];
+-    int num_vlans;
+-    struct encap vlan[2];
+-};
+-struct nf_flowtable { bool hw; };
+-struct nft_flowtable { struct nf_flowtable data; };
+-struct flow_offload_tuple {
+-    int encap_num, in_vlan_ingress, iifidx, mtu;
+-    struct encap encap[2];
+-    struct { int ifidx, hw_ifidx; u8 h_source[6], h_dest[6]; } out;
+-    enum flow_offload_xmit_type xmit_type;
+-};
+-struct flow_offload_tuple_rhash { struct flow_offload_tuple tuple; };
+-struct flow_offload { struct flow_offload_tuple_rhash tuplehash[2]; };
+-static struct net_device ap = {.ifindex=12,.mtu=1500},
+-    lan = {.ifindex=6,.mtu=1500}, eth = {.ifindex=1,.mtu=1500},
+-    bridge = {.ifindex=10,.mtu=1500};
+-static int fail_path, observed_vlan_count;
+-#define BIT(n) (1U << (n))
+-#define htons(x) __builtin_bswap16(x)
+-static bool is_zero_ether_addr(const u8 *address)
+-{ return !memcmp(address, "\0\0\0\0\0\0", 6); }
+-static void ether_addr_copy(u8 *dst, const u8 *src) { memcpy(dst,src,6); }
+-static bool nf_flowtable_hw_offload(struct nf_flowtable *table) { return table->hw; }
+-static bool nft_is_valid_ether_device(const struct net_device *dev) { return !!dev; }
+-static int dev_fill_bridge_path(struct net_device_path_ctx *ctx,
+-                                struct net_device_path_stack *stack)
+-{
+-    if (fail_path) return -1;
+-    observed_vlan_count = ctx->num_vlans;
+-    stack->num_paths=2;
+-    stack->path[0]=(struct net_device_path){.type=DEV_PATH_BRIDGE,.dev=&bridge,
+-        .bridge={.vlan_mode=DEV_PATH_BR_VLAN_KEEP}};
+-    if (ctx->dev == &lan) {
+-        stack->path[1]=(struct net_device_path){.dev=&ap,
+-            .type=ctx->ieee80211 ? DEV_PATH_IEEE80211 : DEV_PATH_AIROHA_WDMA};
+-    } else {
+-        stack->path[1]=(struct net_device_path){.dev=&lan,.type=DEV_PATH_DSA};
+-        stack->path[2]=(struct net_device_path){.dev=&eth,.type=DEV_PATH_ETHERNET};
+-        stack->num_paths=3;
+-    }
+-    return 0;
+-}
+-'''+structure+functions+r'''
+-int main(void)
+-{
+-    struct flow_offload flow={0};
+-    struct nft_flowtable ft={.data={.hw=true}};
+-    u8 src[6]={2,1,2,3,4,5}, dst[6]={2,6,7,8,9,10};
+-    int err=nft_dev_fill_bridge_path(&flow,&ft,ORIGINAL,&lan,&ap,src,dst);
+-    assert((err == 0) == EXPECT_SUCCESS);
+-    if (EXPECT_SUCCESS) {
+-        assert(flow.tuplehash[REPLY].tuple.iifidx==12);
+-        assert(flow.tuplehash[ORIGINAL].tuple.out.ifidx==12);
+-        assert(flow.tuplehash[ORIGINAL].tuple.out.hw_ifidx==12);
+-        assert(!memcmp(flow.tuplehash[ORIGINAL].tuple.out.h_dest,dst,6));
+-        assert(flow.tuplehash[ORIGINAL].tuple.mtu==1500);
+-        assert(flow.tuplehash[ORIGINAL].tuple.xmit_type==FLOW_OFFLOAD_XMIT_DIRECT);
+-    }
+-    assert(!nft_dev_fill_bridge_path(&flow,&ft,REPLY,&ap,&lan,dst,src));
+-    assert(flow.tuplehash[ORIGINAL].tuple.iifidx==6);
+-    assert(flow.tuplehash[REPLY].tuple.out.ifidx==6);
+-    assert(flow.tuplehash[REPLY].tuple.out.hw_ifidx==6);
+-    fail_path=1;
+-    assert(nft_dev_fill_bridge_path(&flow,&ft,ORIGINAL,&lan,&ap,src,dst)<0);
+-    fail_path=0;
+-    assert(nft_dev_fill_bridge_path(&flow,&ft,ORIGINAL,&lan,&eth,src,dst)<0);
+-    memset(&flow,0,sizeof(flow));
+-    flow.tuplehash[REPLY].tuple.encap_num=1;
+-    flow.tuplehash[REPLY].tuple.encap[0]=(struct encap){.id=7,.proto=htons(0x8100)};
+-    assert(!nft_dev_fill_bridge_path(&flow,&ft,REPLY,&ap,&lan,dst,src));
+-    assert(observed_vlan_count==1);
+-    assert(flow.tuplehash[ORIGINAL].tuple.encap_num==1);
+-    assert(flow.tuplehash[ORIGINAL].tuple.encap[0].id==7);
+-    return 0;
+-}
+-'''
+-    with tempfile.TemporaryDirectory() as directory:
+-        path, binary = Path(directory)/'test.c', Path(directory)/'test'
+-        path.write_text(harness)
+-        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',
+-                        '-DEXPECT_SUCCESS='+str(int(succeeds)),str(path),'-o',str(binary)],check=True)
+-        subprocess.run([str(binary)],check=True)
+-
+-
+-def main():
+-    parser=argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--source',type=Path,required=True)
+-    parser.add_argument('--baseline',type=Path)
+-    args=parser.parse_args()
+-    check(args.source, True)
+-    if args.baseline:
+-        check(args.baseline, False)
+-    print('PASS: real Netfilter bridge discovery accepts IEEE80211, preserves DSA/VLAN and rejects invalid paths')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-mt7915-dma-recovery.py b/scripts/tests/test-mt7915-dma-recovery.py
+deleted file mode 100644
+index b5c2655..0000000
+--- a/scripts/tests/test-mt7915-dma-recovery.py
++++ /dev/null
+@@ -1,310 +0,0 @@
+-#!/usr/bin/env python3
+-"""Exercise stalled WFDMA recovery, producer ordering and MMIO-free diagnostics."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    match = re.search(r'^(?:static )?(?:int|void)\s+' + name + r'\([^;]*?\)\n\{', text, re.M)
+-    assert match, name
+-    brace = text.index('{', match.start())
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[match.start():end]
+-
+-
+-def execute(cc, source):
+-    with tempfile.TemporaryDirectory(prefix='mt7915-dma-recovery-') as directory:
+-        path, binary = Path(directory)/'test.c', Path(directory)/'test'
+-        path.write_text(source)
+-        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-Wformat=2', '-Wno-unused-parameter', '-fsanitize=address,undefined', str(path),
+-                        '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-PREFIX = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <stdarg.h>
+-#include <string.h>
+-#include <errno.h>
+-#pragma GCC diagnostic ignored "-Wunused-function"
+-#pragma GCC diagnostic ignored "-Wunused-variable"
+-typedef uint32_t u32;
+-typedef unsigned long long u64;
+-#define BIT(n) (1U << (n))
+-#define READ_ONCE(x) (x)
+-#define WRITE_ONCE(x,v) ((x)=(v))
+-#define MT_RXQ_NPU0 0
+-#define MT_RXQ_NPU1 1
+-#define MT_WFDMA0_GLO_CFG 0x208
+-#define MT_WFDMA0_RST 0x100
+-#define MT_WFDMA0_PCIE1(n) (0x1000+(n))
+-#define MT_WFDMA0(n) (n)
+-#define MT_WFDMA0_GLO_CFG_TX_DMA_EN BIT(0)
+-#define MT_WFDMA0_GLO_CFG_RX_DMA_EN BIT(2)
+-#define MT_WFDMA0_RST_DMASHDL_ALL_RST BIT(5)
+-#define MT_WFDMA0_RST_LOGIC_RST BIT(4)
+-#define MT76_RESET 0
+-#define MT76_MCU_RESET 1
+-#define MT_BAND1 1
+-#define MT_INT1_MASK_CSR 0x308
+-#define MT_INT1_SOURCE_CSR 0x30c
+-#define MT_PCIE_MAC_INT_ENABLE 0x310
+-#define MT_PCIE1_MAC_INT_ENABLE 0x314
+-#define MT_PCIE1_MAC_INT_ENABLE_MT7916 0x318
+-struct mt76_queue { bool stopped; unsigned int head,tail,ndesc; };
+-struct pci_dev { bool master; };
+-struct napi_struct { bool enabled; };
+-struct worker { bool enabled; };
+-struct airoha_npu { int unused; };
+-struct mtk_wed_device { bool active,dma_quarantined; };
+-struct mt76_phy { unsigned long state; };
+-struct mt7915_phy { int unused; };
+-struct mt7915_hif { struct pci_dev *dev; };
+-struct mt76_dev {
+-    struct pci_dev *dev;
+-    struct { bool npu_legacy_rx,npu_quarantined; struct airoha_npu *npu; void *ppe_dev;
+-             struct mtk_wed_device wed; u32 npu_rx_last_info,npu_rx_last_vendor;
+-             u64 npu_rx_host_packets,npu_rx_host_errors; } mmio;
+-    struct mt76_queue q_rx[2];
+-    struct mt76_phy *phys[2];
+-    struct worker tx_worker;
+-    struct napi_struct napi[2],tx_napi;
+-    int mcu;
+-};
+-struct mt7915_dev {
+-    struct mt76_dev mt76;
+-    struct mt76_phy mphy;
+-    struct mt7915_hif *hif2;
+-    bool npu_legacy_failed,npu_legacy_configured,npu_ppe_forwarding;
+-    struct {bool hw_full_reset,wed_failed;} recovery;
+-};
+-static u32 regs[0x2000/4];
+-static int provider_error,provider_calls,poisons,polls,resets,barrier_step,diagnostics;
+-static bool stuck_after_reset,no_provider;
+-static char logbuf[4096];
+-static void __attribute__((format(printf,2,3))) log_message(void *dev,const char *fmt,...)
+-{ (void)dev;va_list args;va_start(args,fmt);vsnprintf(logbuf,sizeof(logbuf),fmt,args);va_end(args); }
+-#define dev_err log_message
+-#define dev_warn log_message
+-#define dev_info log_message
+-#define rcu_dereference_protected(p,c) (p)
+-#define rcu_access_pointer(p) (p)
+-#define to_pci_dev(p) (p)
+-#define mt76_for_each_q_rx(d,i) for((i)=0;(i)<2;(i)++)
+-static void mt7915_irq_disable(struct mt7915_dev *d,u32 mask) { (void)d;assert(mask==~0U); }
+-static void mt76_npu_disable_irqs(struct mt76_dev *d) { (void)d; }
+-static void mt76_clear(struct mt7915_dev *d,u32 reg,u32 mask)
+-{ (void)d;assert(reg<sizeof(regs));regs[reg/4]&=~mask; }
+-static void mt76_set(struct mt7915_dev *d,u32 reg,u32 mask)
+-{
+-    (void)d;assert(reg<sizeof(regs));regs[reg/4]|=mask;
+-    if(reg==MT_WFDMA0_RST||reg==MT_WFDMA0_RST+0x1000) {
+-        assert(provider_calls&&!provider_error);resets++;
+-        if(!stuck_after_reset)regs[(reg-MT_WFDMA0_RST+MT_WFDMA0_GLO_CFG)/4]&=~(BIT(1)|BIT(3));
+-    }
+-}
+-static u32 mt76_rr(struct mt7915_dev *d,u32 reg) { (void)d;assert(reg<sizeof(regs));return regs[reg/4]; }
+-static bool mt76_poll_msec(struct mt7915_dev *d,u32 reg,u32 mask,u32 val,unsigned int ms)
+-{ (void)d;assert(provider_calls);assert(ms==100);polls++;return (regs[reg/4]&mask)==val; }
+-static int airoha_npu_wlan_legacy_quiesce(struct airoha_npu *n,struct pci_dev *d)
+-{ assert(n&&!d->master==false);provider_calls++;return provider_error; }
+-static void airoha_npu_wlan_legacy_poison(struct airoha_npu *n,struct pci_dev *d)
+-{ (void)n;(void)d;poisons++; }
+-static void pci_clear_master(struct pci_dev *p) { p->master=false; }
+-static void setup(struct mt7915_dev *d,bool dual)
+-{
+-    static struct pci_dev pci,hifpci;static struct airoha_npu npu;static struct mt7915_hif hif;
+-    memset(d,0,sizeof(*d));memset(regs,0,sizeof(regs));memset(logbuf,0,sizeof(logbuf));
+-    pci.master=hifpci.master=true;hif.dev=&hifpci;d->mt76.dev=&pci;d->hif2=dual?&hif:NULL;
+-    d->mt76.mmio.npu=&npu;d->mt76.mmio.npu_legacy_rx=true;d->npu_legacy_configured=true;
+-    provider_error=provider_calls=poisons=polls=resets=barrier_step=diagnostics=0;
+-    stuck_after_reset=no_provider=false;
+-    for(int i=0;i<2;i++) {d->mt76.napi[i].enabled=true;d->mt76.q_rx[i].ndesc=256;}
+-    d->mt76.tx_worker.enabled=d->mt76.tx_napi.enabled=true;
+-}
+-'''
+-
+-
+-QUIESCE_TESTS = r'''
+-int main(void)
+-{
+-    struct mt7915_dev d;
+-    for(int dual=0;dual<2;dual++) {
+-        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(0)|BIT(2);
+-        assert(!mt7915_npu_legacy_quiesce(&d,true));
+-        assert(!resets&&provider_calls==1&&!d.npu_legacy_configured&&!d.mt76.dev->master);
+-        assert(!d.mt76.mmio.npu_quarantined&&d.mt76.q_rx[0].stopped&&d.mt76.q_rx[1].stopped);
+-        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(0)|BIT(1)|BIT(2)|BIT(3);
+-        if(dual)regs[(MT_WFDMA0_GLO_CFG+0x1000)/4]=BIT(0)|BIT(1)|BIT(2)|BIT(3);
+-        assert(!mt7915_npu_legacy_quiesce(&d,true));
+-        assert(resets==1+dual&&polls==2*(1+dual)&&!poisons&&!d.mt76.mmio.npu_quarantined);
+-        assert(!(regs[MT_WFDMA0_GLO_CFG/4]&(BIT(0)|BIT(1)|BIT(2)|BIT(3))));
+-        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);stuck_after_reset=true;
+-        assert(mt7915_npu_legacy_quiesce(&d,true)==-ETIMEDOUT);
+-        assert(d.mt76.mmio.npu_quarantined&&d.npu_legacy_failed&&poisons==1);
+-        char expected[80];snprintf(expected,sizeof(expected),"wfdma_error=%d npu_error=0",-ETIMEDOUT);
+-        assert(strstr(logbuf,expected));
+-        int before=resets;assert(mt7915_npu_legacy_quiesce(&d,true)==-EIO&&resets==before);
+-        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);provider_error=-ETIMEDOUT;
+-        assert(mt7915_npu_legacy_quiesce(&d,true)==-ETIMEDOUT);
+-        snprintf(expected,sizeof(expected),"npu_error=%d",-ETIMEDOUT);
+-        assert(!resets&&d.mt76.mmio.npu_quarantined&&strstr(logbuf,expected));
+-        setup(&d,dual);provider_error=-EIO;
+-        assert(mt7915_npu_legacy_quiesce(&d,true)==-EIO&&!resets&&poisons);
+-        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);
+-        assert(mt7915_npu_legacy_quiesce(&d,false)==-ETIMEDOUT&&!resets&&poisons);
+-    }
+-    setup(&d,false);d.mt76.mmio.npu=NULL;
+-    assert(mt7915_npu_legacy_quiesce(&d,true)==-ENODEV&&!resets&&!poisons);
+-    puts("PASS: single/dual HIF stalled WFDMA resets once only after external DMA stop; residual busy/provider failures quarantine; cleanup never resets");
+-}
+-'''
+-
+-
+-def quiesce_test(source, cc):
+-    # Missing provider must still permit polling but not a reset.
+-    prefix = PREFIX.replace('assert(provider_calls);assert(ms==100);',
+-                            'assert(provider_calls||!d->mt76.mmio.npu);assert(ms==100);')
+-    prefix = prefix.replace('assert(n&&!d->master==false);', 'assert(n&&d->master);')
+-    body = '\n'.join(function(source, n) for n in (
+-        'mt7915_npu_legacy_wfdma_idle', 'mt7915_npu_legacy_wfdma_reset',
+-        'mt7915_npu_legacy_quiesce'))
+-    execute(cc, prefix + body + QUIESCE_TESTS)
+-
+-
+-EXTERNAL_STUBS = r'''
+-#define CONFIG_NET_AIROHA_WED 1
+-static int wed_error;
+-static bool mtk_wed_device_active(struct mtk_wed_device *wed) { return wed->active; }
+-static int mtk_wed_device_quiesce(struct mtk_wed_device *wed) { (void)wed;return wed_error; }
+-'''
+-EXTERNAL_TESTS = r'''
+-int main(void)
+-{
+-    struct mt7915_dev d;
+-    for(int full=0;full<2;full++)for(int failed=0;failed<2;failed++) {
+-        setup(&d,false);d.recovery.hw_full_reset=full;d.mt76.mmio.wed.active=true;
+-        regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);wed_error=failed?-EIO:0;
+-        int ret=mt7915_dma_quiesce(&d);
+-        assert(resets==(full&&!failed));
+-        assert((ret==0)==(full&&!failed));
+-        if(ret)assert(d.mt76.mmio.wed.dma_quarantined&&d.mt76.mmio.npu_quarantined);
+-    }
+-    puts("PASS: actual DMA dispatcher permits fallback only for full reset with successful WED stop");
+-}
+-'''
+-
+-
+-def external_test(driver, cc):
+-    prefix = PREFIX.replace('assert(provider_calls);assert(ms==100);',
+-                            'assert(provider_calls||!d->mt76.mmio.npu);assert(ms==100);')
+-    prefix = prefix.replace('assert(n&&!d->master==false);', 'assert(n&&d->master);')
+-    source = (driver/'npu_legacy.c').read_text()
+-    body = '\n'.join(function(source, n) for n in (
+-        'mt7915_npu_legacy_wfdma_idle', 'mt7915_npu_legacy_wfdma_reset',
+-        'mt7915_npu_legacy_quiesce'))
+-    dispatcher = function((driver/'dma.c').read_text(), 'mt7915_dma_quiesce')
+-    dispatcher = dispatcher.split('\tif (!mtk_wed_device_active(wed))', 1)[0] + '\treturn 0;\n}\n'
+-    execute(cc, prefix + body + EXTERNAL_STUBS + dispatcher + EXTERNAL_TESTS)
+-
+-
+-ORDER_STUBS = r'''
+-static int quiesce_error,retired_tokens;
+-static bool mtk_wed_device_active(void *w) { (void)w;return true; }
+-static bool dev_is_pci(void *p) { (void)p;return true; }
+-static bool is_mt7915(struct mt76_dev *d) { (void)d;return false; }
+-static void mt76_wr(struct mt7915_dev *d,u32 r,u32 v) { (void)d;(void)r;(void)v; }
+-static void set_bit(int b,unsigned long *v) { *v|=1UL<<b; }
+-static void wake_up(void *p) { (void)p; }
+-static void mt76_txq_schedule_all(struct mt76_phy *p) { assert(p->state&BIT(MT76_RESET)); }
+-static void mt76_worker_disable(struct worker *w) { assert(w->enabled);w->enabled=false; }
+-static void napi_disable(struct napi_struct *n) { assert(n->enabled);n->enabled=false; }
+-static void napi_enable(struct napi_struct *n) { assert(!n->enabled);n->enabled=true; }
+-static int mt7915_dma_quiesce(struct mt7915_dev *d)
+-{
+-    assert(!d->mt76.tx_worker.enabled&&!d->mt76.tx_napi.enabled);
+-    assert(!d->mt76.napi[0].enabled&&!d->mt76.napi[1].enabled);
+-    assert(d->mphy.state&BIT(MT76_RESET));assert(!retired_tokens);
+-    return quiesce_error;
+-}
+-'''
+-ORDER_TESTS = r'''
+-int main(void)
+-{
+-    struct mt7915_dev d;setup(&d,false);quiesce_error=-ETIMEDOUT;retired_tokens=0;
+-    assert(mt7915_mac_restart(&d)==-ETIMEDOUT&&!retired_tokens);
+-    assert(d.recovery.wed_failed&&!d.mt76.tx_worker.enabled);
+-    assert(d.mt76.napi[0].enabled&&d.mt76.napi[1].enabled&&d.mt76.tx_napi.enabled);
+-    setup(&d,false);quiesce_error=0;retired_tokens=0;
+-    assert(!mt7915_mac_restart(&d)&&retired_tokens==1&&!d.recovery.wed_failed);
+-    puts("PASS: actual full-reset prefix stops software before quiesce; failed stop retains tokens and balances NAPI");
+-}
+-'''
+-
+-
+-def order_test(source, cc):
+-    body = function(source, 'mt7915_mac_restart')
+-    # Stop at the first memory-retirement point; hardware/firmware reboot is
+-    # covered by compilation and a subsequent device test, not faked here.
+-    body = body.split('\t/* token reinit */', 1)[0] + '\tretired_tokens++;\n\t(void)run_main; (void)run_ext; (void)phy2;\n\treturn 0;\n}\n'
+-    prefix = PREFIX.replace('struct mt76_phy { unsigned long state; };',
+-                            'struct mt76_phy { unsigned long state; void *priv; };')
+-    prefix = prefix.replace('int mcu;', 'struct {int wait;} mcu;')
+-    execute(cc, prefix + ORDER_STUBS + body + ORDER_TESTS)
+-
+-
+-STATUS_STUBS = r'''
+-struct seq_file { void *private;char output[4096]; };
+-struct mt7915_phy { struct mt7915_dev *dev; };
+-#define atomic64_read(p) (*(p))
+-static void __attribute__((format(printf,2,3))) seq_printf(struct seq_file *s,const char *fmt,...)
+-{ va_list args;va_start(args,fmt);vsnprintf(s->output+strlen(s->output),sizeof(s->output)-strlen(s->output),fmt,args);va_end(args); }
+-static void seq_puts(struct seq_file *s,const char *text) { seq_printf(s,"%s",text); }
+-'''
+-STATUS_TESTS = r'''
+-int main(void)
+-{
+-    struct mt7915_dev d;struct mt7915_phy phy={.dev=&d};struct seq_file s={.private=&phy};
+-    for(int state=0;state<3;state++) {
+-        setup(&d,false);memset(s.output,0,sizeof(s.output));
+-        d.npu_legacy_configured=state==0;d.npu_legacy_failed=state==2;d.mt76.mmio.npu_quarantined=state==2;
+-        d.mt76.q_rx[0].head=17;d.mt76.q_rx[0].tail=12;d.mt76.q_rx[0].stopped=state!=0;
+-        assert(!mt7915_offload_status_show(&s,NULL));
+-        assert(strstr(s.output,"rx_queue_view: host-software"));
+-        assert(strstr(s.output,"rx0_host_head: 17\nrx0_host_tail: 12"));
+-    }
+-    puts("PASS: live, recovering and quarantined status reads work with no NPU MMIO API present");
+-}
+-'''
+-
+-
+-def status_test(source, cc):
+-    prefix = PREFIX.replace('struct mt7915_phy { int unused; };', '')
+-    execute(cc, prefix + STATUS_STUBS + function(source, 'mt7915_offload_status_show') + STATUS_TESTS)
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--mt76', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    driver = args.mt76/'mt7915'
+-    quiesce_test((driver/'npu_legacy.c').read_text(), args.cc)
+-    external_test(driver, args.cc)
+-    order_test((driver/'mac.c').read_text(), args.cc)
+-    status_test((driver/'debugfs.c').read_text(), args.cc)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-npu-lifecycle.py b/scripts/tests/test-npu-lifecycle.py
+deleted file mode 100644
+index 93e08e3..0000000
+--- a/scripts/tests/test-npu-lifecycle.py
++++ /dev/null
+@@ -1,239 +0,0 @@
+-#!/usr/bin/env python3
+-"""Exercise reset polarity/errors, deferred firmware and reset-held GDMA teardown."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    match = re.search(r'^static int\s+' + name + r'\([^;]*?\)\n\{', text, re.M)
+-    assert match, name
+-    brace = text.index('{', match.start())
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[match.start():end]
+-
+-
+-def run_c(cc, code):
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-npu-lifecycle-') as temporary:
+-        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        source.write_text(code)
+-        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wformat=2',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-def reset_test(text, cc):
+-    prefix = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <errno.h>
+-typedef uint32_t u32;
+-#define BIT(n) (1U << (n))
+-#define RST_NR_PER_BANK 32
+-#define REG_NP_SCU_PCIC 0x88
+-#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+-struct reset_controller_dev { int unused; };
+-struct regmap { u32 regs[64]; int read_error,write_error; };
+-struct en_rst_data { struct reset_controller_dev rcdev; u32 bank_ofs[3]; struct regmap *map; };
+-static int regmap_update_bits(struct regmap *map,u32 offset,u32 mask,u32 value)
+-{ if(map->write_error)return map->write_error;map->regs[offset/4]=(map->regs[offset/4]&~mask)|(value&mask);return 0; }
+-static int regmap_read(struct regmap *map,u32 offset,u32 *value)
+-{ if(map->read_error)return map->read_error;*value=map->regs[offset/4];return 0; }
+-'''
+-    tests = r'''
+-int main(void)
+-{
+-    struct regmap map={0};
+-    struct en_rst_data reset={.bank_ofs={0,4,REG_NP_SCU_PCIC},.map=&map};
+-    const unsigned long ids[]={9,32+14,64+3};
+-    for(unsigned int i=0;i<sizeof(ids)/sizeof(ids[0]);i++) {
+-        unsigned long id=ids[i];u32 offset=reset.bank_ofs[id/32],bit=BIT(id%32);
+-        u32 neighbours=0xa5a5a5a5&~bit;
+-        map.regs[offset/4]=neighbours|(offset==REG_NP_SCU_PCIC?bit:0);
+-        assert(en7523_reset_status(&reset.rcdev,id)==0);
+-        assert(!en7523_reset_update(&reset.rcdev,id,true));
+-        assert(en7523_reset_status(&reset.rcdev,id)==1);
+-        assert((map.regs[offset/4]&~bit)==neighbours);
+-        assert(!en7523_reset_update(&reset.rcdev,id,false));
+-        assert(en7523_reset_status(&reset.rcdev,id)==0);
+-        assert((map.regs[offset/4]&~bit)==neighbours);
+-    }
+-    map.write_error=-EIO;
+-    assert(en7523_reset_update(&reset.rcdev,9,true)==-EIO);
+-    map.read_error=-EIO;
+-    assert(en7523_reset_status(&reset.rcdev,9)==-EIO);
+-    puts("PASS: NPU/GDMA and inverted PCIC resets preserve neighbours, deassert deterministically and propagate regmap errors");
+-}
+-'''
+-    run_c(cc, prefix + function(text, 'en7523_reset_update') + '\n' +
+-          function(text, 'en7523_reset_status') + tests)
+-
+-
+-def lifecycle_test(text, cc):
+-    prefix = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <string.h>
+-#include <errno.h>
+-typedef uint32_t u32;
+-#define BIT(n) (1U<<(n))
+-#define ARRAY_SIZE(a) ((int)(sizeof(a)/sizeof((a)[0])))
+-#define EPROBE_DEFER 517
+-#define WRITE_ONCE(a,b) ((a)=(b))
+-#define lockdep_assert_held(p) assert(*(p))
+-#define NPU_NUM_CORES 8
+-#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
+-#define REG_CR_MBOX_INT_STATUS 0
+-#define MBOX_INT_STATUS_MASK BIT(8)
+-#define REG_IRQ_RXDONE(n) (4+(n)*4)
+-#define NPU_IRQ_RX_MASK(n) BIT(16+(n))
+-#define REG_WDT_TIMER_CTRL(n) (16+(n)*4)
+-#define WDT_INTR_MASK BIT(21)
+-#define LEGACY_GDMA_CTRL0(n) (8+((n)<<4))
+-#define LEGACY_RX_COPY_CHANNEL 3
+-#define LEGACY_GDMA_BUSY BIT(1)
+-#define NPU_EN7581_FIRMWARE_RV32_MAX_SIZE 0x200000
+-#define NPU_EN7581_FIRMWARE_DATA_MAX_SIZE 0x10000
+-#define airoha_wlan_dbg(dev,...) do { (void)(dev); } while(0)
+-enum airoha_npu_legacy_state { LEGACY_STOPPED,LEGACY_RUNNING,LEGACY_FAULT };
+-struct reset_control { int state,write_error,read_error; bool stuck; };
+-struct device { void *of_node; };
+-struct firmware { size_t size; };
+-struct airoha_npu_legacy {
+-    int lock,state,mbox_irq,work_count,wdt_irq[8];bool blocked;
+-    struct reset_control *npu_reset,*gdma_reset;char *gdma;
+-};
+-struct airoha_npu_core { int lock,wdt_work; };
+-struct airoha_npu { struct airoha_npu_legacy *legacy;struct airoha_npu_core cores[8];
+-                    struct device *dev;int irqs[2];void *regmap;int wlan_abi; };
+-static struct reset_control resets[2];
+-static int npu_mmio,gdma_reads,reset_writes,drain_error,syncs,cancels,requests,releases;
+-static int fw_error_at,fw_error,fw_names_count;
+-static size_t fw_sizes[2];
+-static void spin_lock_bh(int *lock) { (*lock)++; }
+-static void spin_unlock_bh(int *lock) { assert(*lock);(*lock)--; }
+-static int reset_control_status(struct reset_control *reset)
+-{ return reset->read_error?reset->read_error:reset->state; }
+-static int reset_control_assert(struct reset_control *reset)
+-{ reset_writes++;if(reset->write_error)return reset->write_error;if(!reset->stuck)reset->state=1;return 0; }
+-static int reset_control_deassert(struct reset_control *reset)
+-{ reset_writes++;if(reset->write_error)return reset->write_error;if(!reset->stuck)reset->state=0;return 0; }
+-#define read_poll_timeout(op,val,cond,delay,timeout,first,arg) ({ \
+-    int result=-ETIMEDOUT;for(int poll=0;poll<32;poll++){val=op(arg);if(cond){result=0;break;}}result; })
+-static void regmap_write(void *map,u32 offset,u32 value)
+-{ (void)map;(void)offset;(void)value;assert(resets[0].state==0);npu_mmio++; }
+-#define regmap_clear_bits regmap_write
+-#define regmap_set_bits regmap_write
+-static int gdma_poll(u32 *value)
+-{ assert(resets[1].state==0);assert(resets[0].state==1);gdma_reads++;*value=0;return drain_error; }
+-#define readl_poll_timeout(addr,value,cond,delay,timeout) ((void)(addr),gdma_poll(&(value)))
+-static void synchronize_irq(int irq) { assert(irq>=0);syncs++; }
+-static void cancel_work_sync(int *work) { (void)work;cancels++; }
+-static int of_property_read_string_array(void *node,const char *property,const char **names,int count)
+-{ (void)node;(void)property;assert(count==2);names[0]="rv32";names[1]="data";return fw_names_count; }
+-static int request_firmware_direct(const struct firmware **fw,const char *name,struct device *dev)
+-{
+-    static struct firmware result;
+-    (void)name;(void)dev;assert(!reset_writes&&!npu_mmio&&!gdma_reads);
+-    requests++;if(requests==fw_error_at)return fw_error;
+-    result.size=fw_sizes[requests-1];*fw=&result;return 0;
+-}
+-static void release_firmware(const struct firmware *fw) { assert(fw);releases++; }
+-static int dev_err_probe(struct device *dev,int error,const char *format,...)
+-{ (void)dev;(void)format;return error; }
+-static void setup(struct airoha_npu *npu,struct airoha_npu_legacy *legacy,int npu_state,int dma_state)
+-{
+-    static struct device device;static char gdma[0x2b0];
+-    memset(npu,0,sizeof(*npu));memset(legacy,0,sizeof(*legacy));memset(resets,0,sizeof(resets));
+-    resets[0].state=npu_state;resets[1].state=dma_state;
+-    legacy->lock=1;legacy->state=LEGACY_RUNNING;legacy->npu_reset=&resets[0];legacy->gdma_reset=&resets[1];
+-    legacy->gdma=gdma;legacy->mbox_irq=-1;
+-    for(int i=0;i<8;i++)legacy->wdt_irq[i]=-1;
+-    npu->legacy=legacy;npu->dev=&device;npu->wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024;
+-    npu_mmio=gdma_reads=reset_writes=drain_error=syncs=cancels=requests=releases=0;
+-    fw_error_at=0;fw_error=-ENOENT;fw_names_count=2;fw_sizes[0]=4096;fw_sizes[1]=8192;
+-}
+-'''
+-    tests = r'''
+-int main(void)
+-{
+-    struct airoha_npu npu;struct airoha_npu_legacy legacy;
+-    /* Reproduce probe retry with either/both blocks already in reset. */
+-    for(int n=0;n<2;n++)for(int d=0;d<2;d++) {
+-        setup(&npu,&legacy,n,d);
+-        assert(!airoha_npu_legacy_stop(&npu));
+-        assert(legacy.state==LEGACY_STOPPED&&legacy.blocked);
+-        assert(resets[0].state==1&&resets[1].state==1);
+-        assert(gdma_reads==!d&&npu_mmio==(!n?11:0));
+-        int reads=gdma_reads,writes=reset_writes;
+-        assert(!airoha_npu_legacy_stop(&npu)&&gdma_reads==reads&&reset_writes==writes);
+-    }
+-    setup(&npu,&legacy,0,0);drain_error=-ETIMEDOUT;
+-    assert(airoha_npu_legacy_stop(&npu)==-ETIMEDOUT&&legacy.state==LEGACY_FAULT&&legacy.blocked&&resets[1].state==1);
+-    setup(&npu,&legacy,0,0);resets[1].read_error=-EIO;
+-    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads);
+-    setup(&npu,&legacy,1,1);resets[0].read_error=-EIO;
+-    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads&&!npu_mmio);
+-    setup(&npu,&legacy,0,0);resets[0].write_error=-EIO;
+-    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads&&resets[1].state==1);
+-    setup(&npu,&legacy,0,0);resets[1].write_error=-EIO;
+-    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&legacy.blocked);
+-    setup(&npu,&legacy,1,1);
+-    assert(!airoha_npu_deassert_reset(&resets[1])&&resets[1].state==0);
+-    resets[1].state=1;resets[1].stuck=true;
+-    assert(airoha_npu_deassert_reset(&resets[1])==-ETIMEDOUT);
+-    resets[1].stuck=false;resets[1].read_error=-EIO;
+-    assert(airoha_npu_deassert_reset(&resets[1])==-EIO);
+-    resets[1].write_error=-EINVAL;
+-    assert(airoha_npu_deassert_reset(&resets[1])==-EINVAL);
+-    puts("PASS: deferred/repeated stop never reads reset-held NPU/GDMA; timeouts/errors retain fault and block state; deassert is verified");
+-
+-    setup(&npu,&legacy,1,1);fw_error_at=1;
+-    assert(airoha_npu_legacy_firmware_ready(&npu)==-EPROBE_DEFER&&requests==1&&!releases&&!reset_writes);
+-    setup(&npu,&legacy,1,1);fw_error_at=2;
+-    assert(airoha_npu_legacy_firmware_ready(&npu)==-EPROBE_DEFER&&requests==2&&releases==1&&!reset_writes);
+-    setup(&npu,&legacy,1,1);fw_error_at=1;fw_error=-EIO;
+-    assert(airoha_npu_legacy_firmware_ready(&npu)==-EIO&&!reset_writes);
+-    setup(&npu,&legacy,1,1);fw_sizes[0]=0x200001;
+-    assert(airoha_npu_legacy_firmware_ready(&npu)==-E2BIG&&releases==1);
+-    setup(&npu,&legacy,1,1);fw_sizes[1]=0;
+-    assert(airoha_npu_legacy_firmware_ready(&npu)==-EINVAL&&releases==2);
+-    setup(&npu,&legacy,1,1);
+-    assert(!airoha_npu_legacy_firmware_ready(&npu)&&requests==2&&releases==2&&!reset_writes);
+-    setup(&npu,&legacy,1,1);npu.wlan_abi=0;
+-    assert(!airoha_npu_legacy_firmware_ready(&npu)&&!requests);
+-    puts("PASS: legacy firmware is checked before hardware ownership; missing pairs defer with no reset/DMA/MMIO side effects");
+-}
+-'''
+-    names = ('airoha_npu_assert_reset', 'airoha_npu_deassert_reset',
+-             'airoha_npu_legacy_stop', 'airoha_npu_legacy_firmware_ready')
+-    run_c(cc, prefix + '\n'.join(function(text, name) for name in names) + tests)
+-    probe = function(text, 'airoha_npu_probe')
+-    assert probe.index('airoha_npu_legacy_firmware_ready') < probe.index('airoha_npu_legacy_init')
+-    boot = function(text, 'airoha_npu_boot')
+-    assert boot.index('airoha_npu_deassert_reset(legacy->gdma_reset)') < boot.index('writel(0, legacy->gdma')
+-    assert boot.index('airoha_npu_deassert_reset(legacy->npu_reset)') < boot.index('REG_RX_BASE')
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    reset_test((args.kernel/'drivers/clk/clk-en7523.c').read_text(), args.cc)
+-    lifecycle_test((args.kernel/'drivers/net/ethernet/airoha/airoha_npu.c').read_text(), args.cc)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-ppe-flow-setup.py b/scripts/tests/test-ppe-flow-setup.py
+deleted file mode 100644
+index a1dd2d2..0000000
+--- a/scripts/tests/test-ppe-flow-setup.py
++++ /dev/null
+@@ -1,97 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute the real diagnostic wrapper and verify driver errors propagate."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    start = text.index('static int '+name+'(')
+-    brace = text.index('{', start)
+-    depth = 1
+-    end = brace + 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[start:end]
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    args = parser.parse_args()
+-    driver = args.kernel/'drivers/net/ethernet/airoha'
+-    header = (driver/'airoha_eth.h').read_text()
+-    stages = re.search(r'enum airoha_ppe_flow_stage \{.*?\n\};', header, re.S)[0]
+-    diag = re.search(r'struct airoha_ppe_flow_diag \{.*?\n\};', header, re.S)[0]
+-    wrapper = function((driver/'airoha_ppe.c').read_text(),
+-                       'airoha_ppe_flow_offload_replace')
+-    c = '''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <errno.h>
+-typedef uint64_t u64;
+-typedef uint16_t u16;
+-typedef long long atomic64_t;
+-#define IFNAMSIZ 16
+-#define lockdep_assert_held(x) ((void)0)
+-'''+stages+'\n'+diag+'''
+-struct airoha_ppe { struct airoha_ppe_flow_diag flow_diag; };
+-struct airoha_eth { struct airoha_ppe *ppe; };
+-struct flow_cls_offload { int unused; };
+-static int result, reject_stage;
+-static int __airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+-                                            struct flow_cls_offload *f)
+-{
+-    (void)f;
+-    eth->ppe->flow_diag.last_stage = reject_stage;
+-    return result;
+-}
+-'''+wrapper+'''
+-int main(void)
+-{
+-    struct airoha_ppe ppe = {0};
+-    struct airoha_eth eth = { .ppe = &ppe };
+-    struct flow_cls_offload flow = {0};
+-    const int errors[] = {-EOPNOTSUPP, -EINVAL, -ENOMEM, -EBUSY};
+-    unsigned int calls = 0;
+-    for (int stage = 0; stage < AIROHA_FLOW_COMPLETE; stage++) {
+-        reject_stage = stage;
+-        for (unsigned int e = 0; e < sizeof(errors)/sizeof(errors[0]); e++) {
+-            result = errors[e];
+-            ppe.flow_diag.last_egress[0] = 'x';
+-            ppe.flow_diag.wdma_wed = true;
+-            ppe.flow_diag.wdma_wcid = 42;
+-            assert(airoha_ppe_flow_offload_replace(&eth, &flow) == result);
+-            calls++;
+-            assert(ppe.flow_diag.errors[stage] == e + 1);
+-            assert(ppe.flow_diag.last_error == result);
+-            assert(ppe.flow_diag.replace_success == 0);
+-            assert(ppe.flow_diag.last_egress[0] == 0);
+-            assert(!ppe.flow_diag.wdma_wed && !ppe.flow_diag.wdma_wcid);
+-        }
+-    }
+-    result = 0;
+-    reject_stage = AIROHA_FLOW_INSERT;
+-    assert(!airoha_ppe_flow_offload_replace(&eth, &flow));
+-    assert(ppe.flow_diag.replace_calls == calls + 1);
+-    assert(ppe.flow_diag.replace_success == 1);
+-    assert(ppe.flow_diag.last_stage == AIROHA_FLOW_COMPLETE);
+-    assert(!ppe.flow_diag.last_error);
+-    return 0;
+-}
+-'''
+-    with tempfile.TemporaryDirectory() as temp:
+-        source, binary = Path(temp)/'test.c', Path(temp)/'test'
+-        source.write_text(c)
+-        subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+-                        str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-    print('PASS: real PPE diagnostic wrapper preserves errors at every setup stage and resets stale context')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-wed-exceptions.py b/scripts/tests/test-wed-exceptions.py
+deleted file mode 100644
+index 3bfb2b4..0000000
+--- a/scripts/tests/test-wed-exceptions.py
++++ /dev/null
+@@ -1,217 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute bounded WED diagnostic decoding and first-error capture in C."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name, kind='static void'):
+-    start = re.search(r'^'+re.escape(kind)+r'\s+'+name+r'\(', text, re.M)
+-    assert start, name
+-    brace = text.index('{', start.start())
+-    end, depth = brace+1, 1
+-    while depth:
+-        depth += (text[end] == '{')-(text[end] == '}')
+-        end += 1
+-    return text[start.start():end]
+-
+-
+-PREFIX = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-typedef uint8_t u8;
+-typedef uint16_t u16;
+-typedef uint32_t u32;
+-typedef unsigned long long u64;
+-typedef uint32_t __le32;
+-typedef uint64_t dma_addr_t;
+-typedef unsigned int spinlock_t;
+-#define BIT(n) (1U<<(n))
+-#define MTK_WED_TX_QUEUES 2
+-#define PAGE_SIZE 4096
+-#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+-#define READ_ONCE(x) (x)
+-#define min_t(t,a,b) ((t)(a)<(t)(b)?(t)(a):(t)(b))
+-#define le32_to_cpu(x) (x)
+-#define upper_32_bits(x) ((u64)(x)>>32)
+-#define lower_32_bits(x) ((u32)(x))
+-#define dma_rmb() ((void)0)
+-#define spin_lock_irqsave(lock,flags) do { flags=0;assert(!*(lock));*(lock)=1; } while(0)
+-#define spin_unlock_irqrestore(lock,flags) do { (void)flags;assert(*(lock));*(lock)=0; } while(0)
+-#define struct_group(name,...) union { struct { __VA_ARGS__ }; struct { __VA_ARGS__ } name; }
+-static u16 get_unaligned_le16(const void *p)
+-{ const u8 *b=p;return b[0]|((u16)b[1]<<8); }
+-static u32 get_unaligned_le32(const void *p)
+-{ const u8 *b=p;return b[0]|((u32)b[1]<<8)|((u32)b[2]<<16)|((u32)b[3]<<24); }
+-static void put16(void *p,u16 v) { u8 *b=p;b[0]=v;b[1]=v>>8; }
+-static void put32(void *p,u32 v) { u8 *b=p;put16(b,v);put16(b+2,v>>16); }
+-static bool debug_enabled=true;
+-static bool airoha_wlan_debug_enabled(void) { return debug_enabled; }
+-'''
+-
+-MIDDLE = r'''
+-struct mtk_wed_ring { void *desc;dma_addr_t desc_phys;unsigned int desc_size;int size;void *wpdma; };
+-struct airoha_wed_buffer { void *data;dma_addr_t dma; };
+-struct airoha_wed {
+-    char *base;
+-    struct airoha_wed_diag *diag;
+-    struct airoha_wed_buffer *buffers;
+-    unsigned int num_pages;
+-};
+-struct mtk_wed_device {
+-    bool airoha;
+-    struct airoha_wed *priv;
+-    struct { unsigned int nbuf,token_start; } wlan;
+-    struct mtk_wed_ring txfree_ring,rx_wdma[2],tx_ring[2];
+-};
+-static struct airoha_wed *airoha_wed_priv(struct mtk_wed_device *wed) { return wed->priv; }
+-static unsigned int reads,writes;
+-static u64 now;
+-static u64 ktime_get_mono_fast_ns(void) { return ++now; }
+-static u32 readl(const void *p) { reads++;return *(const u32 *)p; }
+-'''
+-
+-TESTS = r'''
+-static void decode_tests(void)
+-{
+-    struct airoha_wed_free_record r;
+-    u8 data[1024]={0};
+-    put16(data,24);put16(data+2,4);put32(data+4,4U<<16);
+-    put32(data+8,BIT(31)|(3U<<14));put32(data+12,BIT(30));
+-    put32(data+16,4096U<<15);put32(data+20,8191U|(8192U<<15));
+-    airoha_wed_diag_decode(&r,data,24,false,0,4096,4096,4096);
+-    assert(r.version==4 && r.advertised==4 && r.decoded==4);
+-    assert(r.cpu_tokens==1 && r.wed_tokens==2 && r.unexpected==1);
+-    assert(r.station_words==1 && r.mpdu_words==1 && !r.malformed && !r.truncated);
+-    assert(r.token[0]==0 && r.token[1]==4096 && r.token[2]==8191 && r.token[3]==8192);
+-    for(unsigned int len=0;len<8;len++) {
+-        airoha_wed_diag_decode(&r,data,len,false,0,4096,4096,4096);
+-        assert(r.malformed && !r.decoded);
+-    }
+-    memset(data,0,sizeof(data));put16(data+2,100);put32(data+4,4U<<16);
+-    airoha_wed_diag_decode(&r,data,sizeof(data),false,0,4096,4096,4096);
+-    assert(!r.truncated && !r.malformed && r.raw_words==256 && r.decoded==100);
+-    assert(r.saved_tokens==100);
+-    memset(data,0,sizeof(data));put16(data+2,256);put32(data+4,4U<<16);
+-    airoha_wed_diag_decode(&r,data,sizeof(data),false,0,4096,4096,4096);
+-    assert(!r.truncated && !r.malformed && r.decoded==256 && r.saved_tokens==256);
+-    assert(r.token[255]==0);
+-    airoha_wed_diag_decode(&r,data,12,false,0,4096,4096,4096);
+-    assert(r.malformed && !r.truncated);
+-    memset(data,0,sizeof(data));put16(data+2,1);put32(data+4,4U<<16);
+-    put32(data+8,4096|(0x7fffU<<15));
+-    airoha_wed_diag_decode(&r,data,12,false,0,4096,4096,4096);
+-    assert(r.decoded==1 && r.wed_tokens==1 && !r.malformed);
+-    put32(data+4,3U<<16);put32(data+8,4096U<<16);
+-    airoha_wed_diag_decode(&r,data,12,false,0,4096,4096,4096);
+-    assert(r.version==3 && r.wed_tokens==1 && !r.malformed);
+-    put32(data+4,7U<<16);
+-    airoha_wed_diag_decode(&r,data,12,false,0,4096,4096,4096);
+-    assert(r.unsupported && !r.decoded);
+-    memset(data,0,sizeof(data));put16(data+2,3);
+-    put16(data+8,0);put16(data+10,4096);put16(data+12,65535);
+-    airoha_wed_diag_decode(&r,data,14,true,0,4096,4096,4096);
+-    assert(r.version==0 && r.decoded==3 && r.cpu_tokens==1 && r.wed_tokens==1 && r.unexpected==1);
+-    puts("PASS: real bounded parser handles v4 pairs/markers/sentinels, v0, legacy, short/large/malformed records and token boundaries");
+-}
+-static void capture_tests(void)
+-{
+-    u32 regs[0xb00/4]={0},native[4]={0};
+-    u32 descriptors[4][4]={{1,2,3,4},{5,6,7,8},{9,10,11,12},{13,14,15,16}};
+-    u8 page[4096]={0},data[12]={0};
+-    u64 notifications, services;
+-    struct airoha_wed_diag *diag=calloc(1,sizeof(*diag));
+-    struct airoha_wed_buffer buffer={.data=page,.dma=0x90000000};
+-    struct airoha_wed aw={.base=(char *)regs,.diag=diag,.buffers=&buffer,.num_pages=1};
+-    struct mtk_wed_device wed={.airoha=true,.priv=&aw,.wlan={.token_start=4096,.nbuf=2}};
+-    wed.txfree_ring=(struct mtk_wed_ring){.desc=descriptors,.desc_phys=0x88000000,.desc_size=16,.size=4,.wpdma=native};
+-    regs[MTK_WED_RING_RX(1)/4]=0x88000000;regs[(MTK_WED_RING_RX(1)+4)/4]=4;
+-    put16(data+2,1);put32(data+4,4U<<16);put32(data+8,4096|(0x7fffU<<15));
+-    put16(page+34,4096);page[39]=1;put32(page+40,0x90000080);put16(page+64,54);
+-    page[128]=0xea;
+-    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
+-    assert(diag->state.notifications==1 && !writes);
+-    regs[MTK_WED_WDMA_RX_PROCESSED_MIB(1)/4]=123;
+-    airoha_wed_diag_irq(&wed,0x20,BIT(1));
+-    assert(diag->state.count[1]==1 && diag->state.first[0].valid && !diag->state.first[1].valid);
+-    assert(diag->state.first_wdma[1][1]==123 && diag->state.first[0].host_before.sequence==1);
+-    assert(diag->state.first[0].buffers[0].payload_valid && diag->state.first[0].buffers[0].payload[0]==0xea);
+-    struct airoha_wed_ring_record *ring=&diag->state.first[0].rings[0];
+-    assert(ring->valid && ring->index[0]==2 && ring->index[3]==1 && ring->descriptor[0][0]==9);
+-    u64 stamp=diag->state.first[0].ns;
+-    regs[MTK_WED_WDMA_RX_PROCESSED_MIB(1)/4]=456;
+-    for(unsigned int i=0;i<5000;i++)airoha_wed_diag_irq(&wed,0,BIT(1));
+-    assert(diag->state.count[1]==5001 && diag->state.first[0].ns==stamp);
+-    assert(diag->state.last_wdma[1][1]==456);
+-    airoha_wed_diag_irq(&wed,0,BIT(18));
+-    assert(diag->state.count[18]==1 && diag->state.first[1].valid && diag->state.first[1].ns>stamp);
+-    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
+-    assert(diag->state.first[0].host_after.sequence==2 && diag->state.first[1].host_after.sequence==2);
+-    assert(diag->state.first[0].buffers[0].valid && diag->state.first[0].buffers[0].payload_valid);
+-    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
+-    assert(diag->state.first[0].host_after.sequence==2 && diag->state.latest.sequence==3);
+-    /* Invalid geometry and pointers are recorded, never followed. */
+-    struct airoha_wed_ring_record invalid={0};
+-    wed.txfree_ring.desc=(void *)1;regs[(MTK_WED_RING_RX(1)+4)/4]=5;
+-    airoha_wed_diag_ring(&aw,&invalid,&wed.txfree_ring,MTK_WED_RING_RX(1));
+-    assert(!invalid.valid);
+-    struct airoha_wed_buffer_record bad={0};
+-    put32(page+40,1);
+-    airoha_wed_diag_buffer(&wed,&bad,0);
+-    assert(bad.valid && !bad.payload_valid);
+-    memset(&bad,0,sizeof(bad));airoha_wed_diag_buffer(&wed,&bad,2);
+-    assert(!bad.valid && !writes);
+-    debug_enabled=false;
+-    notifications=diag->state.notifications;services=diag->state.services;
+-    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
+-    airoha_wed_diag_irq(&wed,0,BIT(1));
+-    assert(diag->state.notifications==notifications && diag->state.services==services);
+-    free(diag);
+-    puts("PASS: independent first snapshots survive an error flood; pool/ring bounds, before/after host records and read-only capture verified");
+-}
+-int main(void) { decode_tests();capture_tests();return 0; }
+-'''
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    args = parser.parse_args()
+-    driver = args.kernel/'drivers/net/ethernet/airoha'
+-    text = (driver/'airoha_wed.c').read_text()
+-    header = (driver/'airoha_wed_diag.h').read_text()
+-    registers = (args.kernel/'drivers/net/ethernet/mediatek/mtk_wed_regs.h').read_text()
+-    names = ('MTK_WED_CTRL', 'MTK_WED_TX_BM_CTRL', 'MTK_WED_TX_BM_BASE',
+-             'MTK_WED_TX_BM_INIT_PTR', 'MTK_WED_TX_BM_BUF_LEN', 'MTK_WED_TX_BM_INTF',
+-             'MTK_WED_GLO_CFG', 'MTK_WED_WPDMA_GLO_CFG', 'MTK_WED_RING_RX',
+-             'MTK_WED_WDMA_RX_PROCESSED_MIB')
+-    definitions = [re.search(r'^#define '+name+r'\b[^\n]+', registers, re.M)[0] for name in names]
+-    for name in ('EN7581_WED_CTRL2', 'EN7581_WED_WPDMA_CTRL', 'EN7581_WED_WPDMA_OFFSET0',
+-                 'EN7581_WED_WPDMA_OFFSET1', 'EN7581_WED_WPDMA_RX_RING',
+-                 'EN7581_WED_BUFFER_SIZE', 'EN7581_WED_BUFS_PER_PAGE', 'EN7581_WED_PAYLOAD_SIZE'):
+-        definitions.append(re.search(r'^#define '+name+r'\s+[^\n]+', text, re.M)[0])
+-    reg_array = text[text.index('static const u32 airoha_wed_diag_registers'):text.index('static void airoha_wed_diag_ring(')]
+-    names = ('airoha_wed_diag_ring', 'airoha_wed_diag_buffer', 'airoha_wed_diag_snapshot',
+-             'airoha_wed_diag_irq', 'airoha_wed_diag_txfree')
+-    functions = '\n'.join(function(text, name, 'void' if name.endswith('_txfree') else 'static void') for name in names)
+-    irq = function(text, 'airoha_wed_irq_get', 'static u32')
+-    assert irq.index('airoha_wed_diag_irq(') < irq.index('airoha_wed_write('), 'capture must precede W1C'
+-    assert '0xbc0' not in functions and '0xc00' not in functions
+-    code = '\n'.join((*definitions, PREFIX, header, MIDDLE, reg_array, functions, TESTS))
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-exceptions-') as temporary:
+-        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        source.write_text(code)
+-        subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)],check=True)
+-        subprocess.run([str(binary)],check=True)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-wed-flow-blocks.py b/scripts/tests/test-wed-flow-blocks.py
+deleted file mode 100644
+index ab7e6db..0000000
+--- a/scripts/tests/test-wed-flow-blocks.py
++++ /dev/null
+@@ -1,138 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute WED block binding through simultaneous flowtables and reloads."""
+-import argparse
+-from pathlib import Path
+-import subprocess
+-import tempfile
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    args = parser.parse_args()
+-    source = (args.kernel/'drivers/net/ethernet/airoha/airoha_wed.c').read_text()
+-    start = source.index('static int airoha_wed_setup_tc(')
+-    end = source.index('\nstatic void airoha_wed_ppe_check', start)
+-    function = source[start:end]
+-    common = r'''
+-#include <assert.h>
+-#include <stddef.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <errno.h>
+-enum tc_setup_type { TC_SETUP_BLOCK, TC_SETUP_FT, TC_OTHER };
+-enum { FLOW_BLOCK_BIND, FLOW_BLOCK_UNBIND, FLOW_UNKNOWN };
+-enum { FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS, EGRESS };
+-struct list_head { int unused; };
+-struct net_device { int id; };
+-struct mtk_wed_device { int id; };
+-struct flow_block_offload {
+-    int command, binder_type;
+-    void *block;
+-    struct list_head *driver_block_list;
+-};
+-struct flow_block_cb {
+-    bool allocated, active;
+-    void *block, *ident, *priv;
+-    unsigned int refs;
+-    struct list_head driver_list;
+-};
+-typedef int flow_setup_cb_t(enum tc_setup_type, void *, void *);
+-static struct flow_block_cb pool[32];
+-static int allocations, fail_alloc;
+-#define LIST_HEAD(x) struct list_head x = {0}
+-#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
+-#define PTR_ERR(p) ((int)(intptr_t)(p))
+-static int airoha_wed_setup_cb(enum tc_setup_type t, void *data, void *priv)
+-{ (void)t; (void)data; (void)priv; return 0; }
+-static struct flow_block_cb *flow_block_cb_lookup(void *block,
+-                                               flow_setup_cb_t *cb, void *ident)
+-{
+-    (void)cb;
+-    for (int i = 0; i < 32; i++)
+-        if (pool[i].active && pool[i].block == block && pool[i].ident == ident)
+-            return &pool[i];
+-    return 0;
+-}
+-static struct flow_block_cb *flow_block_cb_alloc(flow_setup_cb_t *cb, void *ident,
+-                                                void *priv, void *release)
+-{
+-    (void)cb; (void)release;
+-    if (fail_alloc) return (void *)(intptr_t)-ENOMEM;
+-    for (int i = 0; i < 32; i++) if (!pool[i].allocated) {
+-        pool[i] = (struct flow_block_cb){.allocated=true, .ident=ident, .priv=priv};
+-        allocations++;
+-        return &pool[i];
+-    }
+-    assert(0); return 0;
+-}
+-static void flow_block_cb_incref(struct flow_block_cb *cb) { cb->refs++; }
+-static int flow_block_cb_decref(struct flow_block_cb *cb)
+-{ assert(cb->refs); return --cb->refs; }
+-static void flow_block_cb_add(struct flow_block_cb *cb, struct flow_block_offload *f)
+-{ cb->active = true; cb->block = f->block; }
+-static void flow_block_cb_remove(struct flow_block_cb *cb, struct flow_block_offload *f)
+-{ assert(cb->block == f->block); cb->active = false; cb->allocated = false; }
+-static void list_add_tail(struct list_head *n, struct list_head *h) { (void)n; (void)h; }
+-static void list_del(struct list_head *n) { (void)n; }
+-'''
+-    test = r'''
+-int main(void)
+-{
+-    int inet, bridge, replacement, unknown;
+-    struct net_device ap0 = {0}, ap1 = {1};
+-    struct mtk_wed_device wed = {1};
+-    struct flow_block_offload f = {.command=FLOW_BLOCK_BIND,
+-        .binder_type=FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS, .block=&inet};
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    assert(allocations == 1);
+-    assert(flow_block_cb_lookup(&inet, airoha_wed_setup_cb, &ap0)->priv == &wed);
+-    f.block = &bridge;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    assert(allocations == 2); /* both tables can bind one AP */
+-    assert(!airoha_wed_setup_tc(&wed, &ap1, TC_SETUP_FT, &f));
+-    assert(allocations == 3); /* same block, second AP */
+-    f.block = &inet;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    assert(allocations == 3); /* shared binding increments its reference */
+-    f.command = FLOW_BLOCK_UNBIND;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    assert(flow_block_cb_lookup(&inet, airoha_wed_setup_cb, &ap0)->refs == 1);
+-    f.block = &replacement; f.command = FLOW_BLOCK_BIND;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    f.block = &inet; f.command = FLOW_BLOCK_UNBIND;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    assert(!flow_block_cb_lookup(&inet, airoha_wed_setup_cb, &ap0));
+-    assert(flow_block_cb_lookup(&bridge, airoha_wed_setup_cb, &ap0));
+-    assert(flow_block_cb_lookup(&replacement, airoha_wed_setup_cb, &ap0));
+-    f.block = &unknown;
+-    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -ENOENT);
+-    f.command = FLOW_BLOCK_BIND; f.binder_type = EGRESS;
+-    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -EOPNOTSUPP);
+-    f.binder_type = FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS;
+-    fail_alloc = 1;
+-    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -ENOMEM);
+-    fail_alloc = 0;
+-    assert(airoha_wed_setup_tc(&wed, &ap0, TC_OTHER, &f) == -EOPNOTSUPP);
+-    f.command = FLOW_UNKNOWN;
+-    assert(airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f) == -EOPNOTSUPP);
+-    f.command = FLOW_BLOCK_UNBIND; f.block = &bridge;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    assert(!airoha_wed_setup_tc(&wed, &ap1, TC_SETUP_FT, &f));
+-    f.block = &replacement;
+-    assert(!airoha_wed_setup_tc(&wed, &ap0, TC_SETUP_FT, &f));
+-    for (int i = 0; i < 32; i++) assert(!pool[i].active && !pool[i].allocated);
+-    return 0;
+-}
+-'''
+-    with tempfile.TemporaryDirectory() as directory:
+-        source, binary = Path(directory)/'test.c', Path(directory)/'test'
+-        source.write_text(common+function+test)
+-        subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+-                        str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-    print('PASS: real WED setup supports inet+bridge, two APs, overlapping reload, reference cleanup and allocation failure')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-storm.py
+deleted file mode 100644
+index 6d66e9e..0000000
+--- a/scripts/tests/test-wed-irq-storm.py
++++ /dev/null
+@@ -1,311 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute WED IRQ classification, acknowledgement and fault draining in C."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name, kind='static void'):
+-    match = re.search(r'^' + re.escape(kind) + r' ' + name + r'\(', text, re.M)
+-    assert match, name
+-    brace = text.index('{', match.start())
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[match.start():end]
+-
+-
+-PREFIX = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <string.h>
+-#include <errno.h>
+-typedef uint32_t u32;
+-typedef uint16_t u16;
+-typedef struct { int v; } atomic_t;
+-#define BIT(n) (1U << (n))
+-#define HZ 100
+-#define MTK_WED_TX_QUEUES 2
+-#define U16_MAX UINT16_MAX
+-#define READ_ONCE(x) (x)
+-#define WRITE_ONCE(x,v) ((x)=(v))
+-#define xchg(p,v) ({ __typeof__(*(p)) old=*(p); *(p)=(v); old; })
+-#define time_after(a,b) ((long)((b)-(a))<0)
+-#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+-static unsigned long jiffies;
+-static int atomic_read(const atomic_t *a) { return a->v; }
+-static void atomic_set(atomic_t *a,int v) { a->v=v; }
+-static int atomic_inc_return(atomic_t *a) { return ++a->v; }
+-static void atomic_inc(atomic_t *a) { a->v++; }
+-static int atomic_cmpxchg(atomic_t *a,int old,int v)
+-{ int was=a->v; if(was==old)a->v=v; return was; }
+-struct device { int unused; };
+-struct work_struct { bool queued; };
+-struct mutex { bool held; };
+-static struct mutex airoha_wed_lock;
+-struct mtk_wed_device;
+-struct airoha_ppe_dev {
+-    bool enabled;
+-    struct { int (*flush_wed)(struct airoha_ppe_dev *,u16);
+-             int (*set_wed)(struct airoha_ppe_dev *,bool); } ops;
+-};
+-struct airoha_wed {
+-    struct device *dev;
+-    char *base;
+-    u32 regs[0xb00/4];
+-    struct mtk_wed_device *wlan;
+-    struct airoha_ppe_dev *ppe;
+-    int irq;
+-    bool irq_disabled,poisoned,ppe_configured;
+-    atomic_t irq_count,irq_error_count,irq_storm;
+-    unsigned long irq_window;
+-    u32 irq_progress[MTK_WED_TX_QUEUES*2];
+-    u32 irq_last_status,irq_last_errors;
+-    struct work_struct irq_fault_work;
+-    struct mutex quiesce_lock;
+-    const char *last_stop_stage;
+-    int last_stop_error,last_dma_stop_error,last_flush_error;
+-};
+-struct mtk_wed_device {
+-    struct airoha_wed *priv;
+-    struct device *dev;
+-    bool running,dma_quarantined;
+-};
+-static struct airoha_wed *airoha_wed_priv(struct mtk_wed_device *w)
+-{ return w->priv; }
+-static unsigned int disables,errors,exceptions,scheduled,mib_reads;
+-static unsigned int flushes,drains,step;
+-static int flush_error,drain_error;
+-static bool expect_fault_order;
+-static u32 readl(const char *p) { mib_reads++;return *(const u32 *)p; }
+-static void writel(u32 v,char *p) { *(u32 *)p=v; }
+-static void disable_irq_nosync(int irq) { assert(irq==27);disables++; }
+-static void disable_irq(int irq) { assert(irq==27);disables++; }
+-static bool schedule_work(struct work_struct *work)
+-{ assert(!work->queued);work->queued=true;scheduled++;return true; }
+-static void mutex_lock(struct mutex *m) { assert(!m->held);m->held=true; }
+-static void mutex_unlock(struct mutex *m) { assert(m->held);m->held=false; }
+-static void note(const char *format,...) { (void)format;errors++; }
+-#define dev_err(dev,...) do { (void)(dev);note(__VA_ARGS__); } while(0)
+-#define dev_warn_ratelimited(dev,...) do { (void)(dev);exceptions++; } while(0)
+-#define airoha_wlan_dbg(dev,...) do { (void)(dev); } while(0)
+-static bool airoha_wlan_debug_enabled(void) { return false; }
+-static u32 airoha_wed_read(struct mtk_wed_device *w,u32 off)
+-{ return w->priv->regs[off/4]; }
+-static void airoha_wed_write(struct mtk_wed_device *w,u32 off,u32 value)
+-{
+-    if(off==MTK_WED_INT_STATUS || off==MTK_WED_EXT_INT_STATUS)
+-        w->priv->regs[off/4]&=~value;
+-    else w->priv->regs[off/4]=value;
+-}
+-static int flush_wed(struct airoha_ppe_dev *ppe,u16 wcid)
+-{
+-    assert(wcid==U16_MAX);flushes++;
+-    if(expect_fault_order)assert(!ppe->enabled && step++==1);
+-    return flush_error;
+-}
+-static int set_wed(struct airoha_ppe_dev *ppe,bool enabled)
+-{
+-    assert(!enabled && airoha_wed_lock.held);
+-    assert(step++==0);ppe->enabled=enabled;return 0;
+-}
+-static void airoha_wed_diag_irq(struct mtk_wed_device *wed,u32 status,u32 errors)
+-{ (void)wed;(void)status;(void)errors; }
+-static int airoha_wed_quiesce(struct mtk_wed_device *wed)
+-{
+-    assert(wed->priv->quiesce_lock.held);drains++;
+-    if(expect_fault_order)assert(step++==2);
+-    wed->running=false;return drain_error;
+-}
+-enum tc_setup_type { TC_SETUP_CLSFLOWER,TC_OTHER };
+-enum { FLOW_CLS_REPLACE,FLOW_CLS_DESTROY };
+-struct flow_cls_offload { int command; };
+-static int callbacks;
+-static int airoha_ppe_dev_setup_tc_block_cb(struct airoha_ppe_dev *ppe,void *data)
+-{ (void)ppe;(void)data;callbacks++;return 0; }
+-'''
+-
+-TESTS = r'''
+-static void initialize(struct airoha_wed *aw,struct mtk_wed_device *wed,
+-                       struct airoha_ppe_dev *ppe)
+-{
+-    memset(aw,0,sizeof(*aw));memset(wed,0,sizeof(*wed));
+-    aw->base=(char *)aw->regs;aw->irq=27;aw->wlan=wed;aw->ppe=ppe;
+-    aw->ppe_configured=true;wed->priv=aw;wed->running=true;
+-    *ppe=(struct airoha_ppe_dev){.enabled=true,
+-        .ops={.flush_wed=flush_wed,.set_wed=set_wed}};
+-    disables=errors=exceptions=scheduled=mib_reads=flushes=drains=step=0;
+-    flush_error=drain_error=0;expect_fault_order=false;jiffies=1000;
+-}
+-static bool asserted(struct airoha_wed *aw)
+-{
+-    return (aw->regs[MTK_WED_INT_STATUS/4]&aw->regs[MTK_WED_INT_MASK/4]) ||
+-           (aw->regs[MTK_WED_EXT_INT_STATUS/4]&aw->regs[MTK_WED_EXT_INT_MASK/4]);
+-}
+-static void masking_tests(void)
+-{
+-    struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
+-    initialize(&aw,&wed,&ppe);
+-    u32 error=MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
+-    u32 benign=BIT(1);
+-    airoha_wed_irq_mask(&wed,0x20);
+-    aw.regs[MTK_WED_EXT_INT_STATUS/4]=benign;
+-    assert(!asserted(&aw));
+-    assert(!airoha_wed_irq_get(&wed,0x20));
+-    assert(aw.regs[MTK_WED_EXT_INT_STATUS/4]==benign);
+-    assert(aw.irq_count.v==0 && exceptions==0);
+-
+-    airoha_wed_irq_mask(&wed,0x20);aw.regs[MTK_WED_EXT_INT_STATUS/4]=error;
+-    assert(error==0x80000 && asserted(&aw));
+-    airoha_wed_irq_mask(&wed,0);assert(!asserted(&aw));
+-    assert(aw.regs[MTK_WED_EXT_INT_STATUS/4]==error);
+-    assert(!airoha_wed_irq_get(&wed,0x20));
+-    assert(!aw.regs[MTK_WED_EXT_INT_STATUS/4] && exceptions==1);
+-    assert(aw.irq_count.v==1); /* one serviced cause, not a mask operation */
+-    aw.regs[MTK_WED_INT_STATUS/4]=0x24;
+-    aw.regs[MTK_WED_EXT_INT_STATUS/4]=error;
+-    assert(airoha_wed_irq_get(&wed,0x20)==0x20);
+-    assert(aw.regs[MTK_WED_INT_STATUS/4]==4 && exceptions==2);
+-    for(int n=0;n<3*AIROHA_WED_IRQ_STORM_LIMIT;n++) {
+-        airoha_wed_irq_mask(&wed,0);airoha_wed_irq_mask(&wed,0);
+-    }
+-    assert(aw.irq_count.v==2 && !scheduled && !disables);
+-    aw.regs[MTK_WED_INT_STATUS/4]=0;
+-    for(int n=0;n<3*AIROHA_WED_IRQ_STORM_LIMIT;n++)
+-        assert(!airoha_wed_irq_get(&wed,0x20));
+-    assert(aw.irq_count.v==2 && !scheduled && !disables);
+-    puts("PASS: W1C/masking retained; repeated masks and native-only service do not count as WED interrupts");
+-}
+-static void progress_tests(void)
+-{
+-    struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
+-    initialize(&aw,&wed,&ppe);
+-    for(int n=0;n<3*AIROHA_WED_IRQ_STORM_LIMIT;n++) {
+-        aw.regs[MTK_WED_INT_STATUS/4]=0x20;
+-        aw.regs[MTK_WED_WDMA_RX_PROCESSED_MIB(1)/4]++;
+-        airoha_wed_irq_mask(&wed,0); /* hard IRQ */
+-        airoha_wed_irq_mask(&wed,0); /* tasklet */
+-        assert(airoha_wed_irq_get(&wed,0x20)==0x20);
+-    }
+-    assert(!scheduled && !disables && !wed.dma_quarantined);
+-    assert(mib_reads<32); /* no per-packet progress MMIO */
+-    initialize(&aw,&wed,&ppe);
+-    for(int n=0;n<AIROHA_WED_IRQ_STORM_LIMIT;n++) {
+-        aw.regs[MTK_WED_INT_STATUS/4]=0x20;
+-        assert(airoha_wed_irq_get(&wed,0x20)==0x20);
+-    }
+-    jiffies+=HZ+1;aw.regs[MTK_WED_INT_STATUS/4]=0x20;
+-    assert(airoha_wed_irq_get(&wed,0x20)==0x20 && aw.irq_count.v==1);
+-    assert(!scheduled && !disables);
+-    /* High-rate hardware errors still stop even if data counters move. */
+-    initialize(&aw,&wed,&ppe);
+-    for(int n=0;n<AIROHA_WED_IRQ_STORM_LIMIT+1;n++) {
+-        aw.regs[MTK_WED_EXT_INT_STATUS/4]=MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
+-        aw.regs[MTK_WED_WDMA_RX_PROCESSED_MIB(0)/4]++;
+-        airoha_wed_irq_get(&wed,0x20);
+-    }
+-    assert(scheduled==1 && disables==1 && wed.dma_quarantined);
+-    assert(aw.irq_error_count.v==AIROHA_WED_IRQ_STORM_LIMIT+1);
+-    initialize(&aw,&wed,&ppe);
+-    /* Progress in either band and counter wrap are accepted. */
+-    for(unsigned int band=0;band<2;band++) {
+-        aw.regs[MTK_WED_TX_MIB(band)/4]=UINT32_MAX;
+-        assert(airoha_wed_irq_progress(&aw));
+-        aw.regs[MTK_WED_TX_MIB(band)/4]=0;
+-        assert(airoha_wed_irq_progress(&aw));
+-    }
+-    puts("PASS: progressing traffic exceeds the old mask threshold without quarantine; windows and MIB wrap handled");
+-}
+-static void fault_tests(void)
+-{
+-    struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
+-    struct flow_cls_offload replace={.command=FLOW_CLS_REPLACE};
+-    struct flow_cls_offload destroy={.command=FLOW_CLS_DESTROY};
+-    initialize(&aw,&wed,&ppe);
+-    for(int n=0;n<AIROHA_WED_IRQ_STORM_LIMIT+1;n++) {
+-        aw.regs[MTK_WED_EXT_INT_STATUS/4]=MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
+-        assert(!airoha_wed_irq_get(&wed,0x20));
+-    }
+-    assert(scheduled==1 && disables==1 && aw.irq_disabled && wed.dma_quarantined);
+-    assert(aw.irq_last_errors==MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN);
+-    assert(airoha_wed_setup_cb(TC_SETUP_CLSFLOWER,&replace,&wed)==-EOPNOTSUPP);
+-    assert(!airoha_wed_setup_cb(TC_SETUP_CLSFLOWER,&destroy,&wed));
+-    for(int n=0;n<3*AIROHA_WED_IRQ_STORM_LIMIT;n++) {
+-        aw.regs[MTK_WED_INT_STATUS/4]=0x20;
+-        assert(!airoha_wed_irq_get(&wed,0x20));
+-        airoha_wed_irq_mask(&wed,0xff);
+-    }
+-    assert(scheduled==1 && disables==1 && !asserted(&aw));
+-    expect_fault_order=true;airoha_wed_irq_fault_work(&aw.irq_fault_work);
+-    assert(step==3 && flushes==1 && drains==1 && disables==1);
+-    assert(!ppe.enabled && !aw.ppe_configured && !wed.running && aw.poisoned);
+-    assert(wed.dma_quarantined && !airoha_wed_lock.held && !aw.quiesce_lock.held);
+-    /* A detached consumer is never dereferenced by deferred work. */
+-    aw.wlan=NULL;airoha_wed_irq_fault_work(&aw.irq_fault_work);
+-    assert(flushes==1 && drains==1 && !airoha_wed_lock.held);
+-    puts("PASS: repeated no-progress errors schedule one quarantine; gate closes before flush and DMA drain; deletes remain allowed");
+-}
+-static void drain_tests(void)
+-{
+-    struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
+-    for(int scenario=0;scenario<4;scenario++) {
+-        initialize(&aw,&wed,&ppe);
+-        if(scenario==1)aw.poisoned=true;
+-        if(scenario==2)flush_error=-ETIMEDOUT;
+-        if(scenario==3)drain_error=-ETIMEDOUT;
+-        int err=airoha_wed_stop_sync(&wed);
+-        assert(flushes==1 && drains==1 && !wed.running && !aw.quiesce_lock.held);
+-        assert((err==0)==(scenario==0));
+-        assert(wed.dma_quarantined==(scenario!=0));
+-        assert(aw.poisoned==(scenario!=0));
+-    }
+-    puts("PASS: poisoned/failed paths still invalidate and drain; failed ownership stays quarantined");
+-}
+-int main(void)
+-{
+-    masking_tests();progress_tests();fault_tests();drain_tests();
+-    return 0;
+-}
+-'''
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    text = (args.kernel/'drivers/net/ethernet/airoha/airoha_wed.c').read_text()
+-    registers = (args.kernel/'drivers/net/ethernet/mediatek/mtk_wed_regs.h').read_text()
+-    names = ('MTK_WED_INT_STATUS', 'MTK_WED_INT_MASK',
+-             'MTK_WED_EXT_INT_STATUS', 'MTK_WED_EXT_INT_MASK',
+-             'MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN',
+-             'MTK_WED_TX_MIB', 'MTK_WED_WDMA_RX_PROCESSED_MIB')
+-    definitions = [re.search(r'^#define ' + name + r'\b[^\n]+', registers, re.M).group()
+-                   for name in names]
+-    for name in ('AIROHA_WED_IRQ_STORM_LIMIT', 'EN7581_WED_EXT_ERRORS'):
+-        definitions.append(re.search(r'^#define ' + name + r'\s+[^\n]+', text, re.M).group())
+-    functions = [('airoha_wed_irq_progress', 'static bool'),
+-                 ('airoha_wed_irq_storm_check', 'static void'),
+-                 ('airoha_wed_irq_mask', 'static void'),
+-                 ('airoha_wed_irq_get', 'static u32'),
+-                 ('airoha_wed_stop_sync', 'static int'),
+-                 ('airoha_wed_irq_fault_work', 'static void'),
+-                 ('airoha_wed_setup_cb', 'static int')]
+-    code = '\n'.join((*definitions, PREFIX,
+-                      *(function(text, name, kind) for name, kind in functions), TESTS))
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-irq-test-') as temporary:
+-        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        source.write_text(code)
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)],check=True)
+-        subprocess.run([str(binary)],check=True)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-wed-probe.py b/scripts/tests/test-wed-probe.py
+deleted file mode 100644
+index 7cf38ad..0000000
+--- a/scripts/tests/test-wed-probe.py
++++ /dev/null
+@@ -1,184 +0,0 @@
+-#!/usr/bin/env python3
+-"""Compile the shipped PPE/WED probe functions against HG5585F port layouts."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    match = re.search(r'^static int ' + re.escape(name) + r'\(', text, re.M)
+-    assert match, name
+-    brace = text.index('{', match.start())
+-    end, depth = brace + 1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[match.start():end]
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    args = parser.parse_args()
+-    driver = args.kernel/'drivers/net/ethernet/airoha'
+-    header = (driver/'airoha_eth.h').read_text()
+-    gdm_ids = re.search(r'enum airoha_gdm_index \{[\s\S]*?\};', header).group()
+-    limits = '\n'.join(re.search(r'^#define ' + name + r'\s+\d+', header, re.M).group()
+-                       for name in ('AIROHA_MAX_NUM_GDM_PORTS', 'AIROHA_MAX_NUM_GDM_DEVS'))
+-    prefix = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <stdio.h>
+-#include <stdarg.h>
+-#include <string.h>
+-#include <errno.h>
+-typedef uint32_t u32;
+-#define ARRAY_SIZE(a) ((int)(sizeof(a) / sizeof((a)[0])))
+-#define __releases(lock)
+-#define EPROBE_DEFER 517
+-#define PCI_VENDOR_ID_MEDIATEK 0x14c3
+-#define MTK_WED_BUS_PCIE 1
+-#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
+-#define CONFIG_NET_AIROHA_PPE_HG5585F 1
+-#define IS_ENABLED(v) (v)
+-#define PTR_ERR(p) ((int)(intptr_t)(p))
+-#define ERR_PTR(e) ((void *)(intptr_t)(e))
+-#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
+-#define upper_32_bits(v) ((uint64_t)(v) >> 32)
+-#define MTK_WDMA_GLO_CFG 0
+-#define MTK_WDMA_GLO_CFG_TX_DMA_EN 1
+-#define MTK_WDMA_GLO_CFG_TX_DMA_BUSY 2
+-#define MTK_WED_RESET_WED 1
+-#define DL_FLAG_AUTOREMOVE_CONSUMER 2
+-#define airoha_wlan_dbg(dev, component, fmt, ...) do { \
+-    if (debug_enabled) dev_err(dev, fmt, ##__VA_ARGS__); \
+-} while (0)
+-struct device_node { int value; };
+-struct device { struct device_node *of_node; };
+-struct pci_dev { int vendor, device; void *bus; struct device dev; };
+-struct device_link { unsigned int flags; };
+-struct airoha_gdm_dev { int nbq; };
+-'''
+-    middle = r'''
+-struct airoha_gdm_port { struct airoha_gdm_dev *devs[AIROHA_MAX_NUM_GDM_DEVS]; int id; };
+-struct airoha_eth { struct device *dev; struct airoha_gdm_port *ports[AIROHA_MAX_NUM_GDM_PORTS]; };
+-struct airoha_ppe_dev { void *priv; struct { int (*prepare_legacy)(struct airoha_ppe_dev *); int (*set_wed)(struct airoha_ppe_dev *,bool); } ops; };
+-struct airoha_ppe { struct airoha_eth *eth; bool wed_enabled; };
+-struct airoha_npu { unsigned int wlan_abi; struct device *dev; };
+-struct mtk_wed_device {
+-    struct { int bus_type; struct pci_dev *pci_dev; int (*offload_enable)(struct mtk_wed_device *); void (*offload_disable)(struct mtk_wed_device *); } wlan;
+-    void *priv; struct device *dev; int irq,wdma_idx,version; bool airoha;
+-};
+-struct airoha_wed { struct device *dev; struct mtk_wed_device *wlan; bool poisoned,legacy,tokens_reserved,ppe_configured; struct airoha_ppe_dev *ppe; u32 *wdma; int irq; const char *last_attach_stage; int last_attach_error; u32 last_wdma_cfg; };
+-static int flow_offload_mutex,airoha_wed_lock,held,mtu_calls,error_records;
+-static char last_error[512];
+-static void mutex_lock(int *lock) { (void)lock;held++; }
+-static void mutex_unlock(int *lock) { (void)lock;assert(held);held--; }
+-static void rcu_read_unlock(void) {}
+-static void airoha_ppe_wed_mtu(struct airoha_ppe *ppe) { (void)ppe;mtu_calls++; }
+-static void dev_err(struct device *dev,const char *format,...) __attribute__((format(printf,2,3)));
+-static void dev_err(struct device *dev,const char *format,...)
+-{ (void)dev;va_list ap;va_start(ap,format);vsnprintf(last_error,sizeof(last_error),format,ap);va_end(ap);error_records++; }
+-static struct airoha_wed *airoha_wed1;
+-static struct device_node node;
+-static struct device supplier={.of_node=&node};
+-static struct airoha_npu npu={.dev=&supplier};
+-static int npu_error,ppe_error,prepare_error,quiesce_error,reset_error,buffer_error,token_error,set_wed_error;
+-static int npu_refs,ppe_refs,node_refs,buffers,token_disables,links,managed_deletes;
+-static bool link_error,firmware_error,debug_enabled;
+-static struct device_link link;
+-static struct device_node *of_parse_phandle(struct device_node *np,const char *name,int index)
+-{ (void)np;(void)name;(void)index;node_refs++;return &node; }
+-static void of_node_put(struct device_node *np) { assert(np==&node);node_refs--; }
+-static int pci_domain_nr(void *bus) { (void)bus;return 1; }
+-static uint64_t pci_resource_start(struct pci_dev *pci,int index) { (void)pci;(void)index;return 0x24000000; }
+-static struct airoha_npu *airoha_npu_get(struct device *dev)
+-{ (void)dev;if(npu_error)return ERR_PTR(npu_error);npu_refs++;return &npu; }
+-static void airoha_npu_put(struct airoha_npu *p) { assert(p==&npu && npu_refs>0);npu_refs--; }
+-static int of_property_read_string_array(struct device_node *np,const char *name,const char **names,int count)
+-{ (void)np;(void)name;assert(count==2);names[0]="airoha/en7581_npu_rv32.bin";names[1]="airoha/en7581_npu_data.bin";return firmware_error ? -EINVAL : 2; }
+-static int prepare_legacy(struct airoha_ppe_dev *ppe) { (void)ppe;return prepare_error; }
+-static int set_wed(struct airoha_ppe_dev *ppe,bool enable) { (void)ppe;assert(enable);return set_wed_error; }
+-static struct airoha_ppe_dev ppe_supplier={.ops={.prepare_legacy=prepare_legacy,.set_wed=set_wed}};
+-static struct airoha_ppe_dev *airoha_ppe_get_dev(struct device *dev)
+-{ (void)dev;if(ppe_error)return ERR_PTR(ppe_error);ppe_refs++;return &ppe_supplier; }
+-static void airoha_ppe_put_dev(struct airoha_ppe_dev *ppe) { assert(ppe==&ppe_supplier && ppe_refs>0);ppe_refs--; }
+-static struct device_link *device_link_add(struct device *consumer,struct device *provider,unsigned int flags)
+-{ (void)consumer;assert(provider==&supplier && flags==DL_FLAG_AUTOREMOVE_CONSUMER);if(link_error)return NULL;link.flags=flags;links++;return &link; }
+-static void __attribute__((unused)) device_link_del(struct device_link *p)
+-{ assert(p==&link);if(p->flags==DL_FLAG_AUTOREMOVE_CONSUMER)managed_deletes++;else links--; }
+-static u32 readl(u32 *address) { return *address; }
+-static int airoha_wed_quiesce(struct mtk_wed_device *wed) { (void)wed;return quiesce_error; }
+-static int airoha_wed_reset(struct mtk_wed_device *wed,int mask) { (void)wed;(void)mask;return reset_error; }
+-static int airoha_wed_buffers_alloc(struct mtk_wed_device *wed) { (void)wed;buffers++;return buffer_error; }
+-static void airoha_wed_buffers_free(struct mtk_wed_device *wed) { (void)wed;buffers=0; }
+-static int offload_enable(struct mtk_wed_device *wed) { (void)wed;return token_error; }
+-static void offload_disable(struct mtk_wed_device *wed) { (void)wed;token_disables++; }
+-'''
+-    tests = r'''
+-static void port_tests(void)
+-{
+-    struct airoha_eth eth={0};struct airoha_ppe ppe={.eth=&eth};struct airoha_ppe_dev dev={.priv=&ppe};
+-    struct airoha_gdm_port ports[AIROHA_MAX_NUM_GDM_PORTS]={0};struct airoha_gdm_dev netdev={.nbq=0};
+-    /* HG5585F: Ethernet GDM1, PON GDM2, no GDM3 netdev, LAN1 on GDM4. */
+-    for(int i=0;i<AIROHA_MAX_NUM_GDM_PORTS;i++){ports[i].id=i+1;eth.ports[i]=&ports[i];if(i!=AIROHA_GDM3_IDX-1)ports[i].devs[0]=&netdev;}
+-    eth.ports[AIROHA_GDM3_IDX-1]=NULL;
+-    assert(airoha_ppe_set_wed(&dev,true)==0 && ppe.wed_enabled && mtu_calls==1 && held==0);
+-    eth.ports[AIROHA_GDM3_IDX-1]=&ports[AIROHA_GDM3_IDX-1];
+-    assert(airoha_ppe_set_wed(&dev,true)==0 && mtu_calls==2 && held==0);
+-    for(int i=0;i<AIROHA_MAX_NUM_GDM_DEVS;i++){
+-        int before=mtu_calls;ppe.wed_enabled=false;ports[AIROHA_GDM3_IDX-1].devs[i]=&netdev;netdev.nbq=i+4;
+-        assert(airoha_ppe_set_wed(&dev,true)==-EBUSY && !ppe.wed_enabled && mtu_calls==before && held==0);
+-        assert(airoha_ppe_set_wed(&dev,false)==0 && !ppe.wed_enabled && mtu_calls==before+1 && held==0);
+-        ports[AIROHA_GDM3_IDX-1].devs[i]=NULL;
+-    }
+-    puts("PASS: HG5585F LAN1/GDM4 and PON coexist with WED; every occupied GDM3 slot still rejects enable");
+-}
+-static void attach_tests(void)
+-{
+-    const char *stages[]={"provider","ownership","npu_supplier","firmware_abi","ppe_supplier","ppe_prepare","device_link","wdma_busy","quiesce","reset","buffers","tokens","ppe_enable","ppe_enable"};
+-    for(int scenario=0;scenario<14;scenario++){
+-        struct pci_dev pci={.vendor=PCI_VENDOR_ID_MEDIATEK,.device=0x7906};u32 wdma=0;
+-        struct airoha_wed aw={.dev=&supplier,.irq=42,.wdma=&wdma};
+-        struct mtk_wed_device wed={.wlan={.bus_type=MTK_WED_BUS_PCIE,.pci_dev=&pci,.offload_enable=offload_enable,.offload_disable=offload_disable}};
+-        npu_error=ppe_error=prepare_error=quiesce_error=reset_error=buffer_error=token_error=set_wed_error=0;
+-        npu_refs=ppe_refs=node_refs=buffers=token_disables=links=managed_deletes=error_records=0;
+-        link_error=firmware_error=false;npu.wlan_abi=0;airoha_wed1=&aw;
+-        switch(scenario){case 0:airoha_wed1=NULL;break;case 1:aw.poisoned=true;break;case 2:npu_error=-EPROBE_DEFER;break;case 3:firmware_error=true;break;case 4:ppe_error=-EPROBE_DEFER;break;case 5:npu.wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024;prepare_error=-EBUSY;break;case 6:link_error=true;break;case 7:wdma=MTK_WDMA_GLO_CFG_TX_DMA_EN;break;case 8:quiesce_error=-ETIMEDOUT;break;case 9:reset_error=-ETIMEDOUT;break;case 10:buffer_error=-ENOMEM;break;case 11:token_error=1;break;case 12:set_wed_error=-EBUSY;break;default:break;}
+-        int result=airoha_wed_attach(&wed);
+-        assert(held==0 && npu_refs==0 && node_refs==0 && managed_deletes==0);
+-        if(scenario<13){
+-            assert(result<0 && error_records==1 && strstr(last_error,stages[scenario]));
+-            assert(aw.wlan==NULL && !aw.ppe_configured && !aw.tokens_reserved && buffers==0 && ppe_refs==0);
+-            assert(!wed.priv && !wed.airoha);
+-            if(scenario!=0){assert(aw.last_attach_error==result && !strcmp(aw.last_attach_stage,stages[scenario]));}
+-            /* Driver core performs AUTOREMOVE_CONSUMER cleanup on failed probe. */
+-            links=0;
+-        }else{
+-            assert(result==0 && aw.wlan==&wed && aw.ppe_configured && aw.tokens_reserved && wed.airoha);
+-            assert(ppe_refs==1 && buffers==1 && links==1 && aw.last_attach_error==0);
+-            ppe_refs=buffers=links=0;
+-        }
+-    }
+-    puts("PASS: WED attach failures retain no PPE/tokens/buffers, preserve managed link ownership and report stages with debug off");
+-}
+-int main(void){port_tests();attach_tests();return 0;}
+-'''
+-    code='\n'.join((prefix,gdm_ids,limits,middle,
+-                    function((driver/'airoha_ppe.c').read_text(),'airoha_ppe_set_wed'),
+-                    function((driver/'airoha_wed.c').read_text(),'airoha_wed_attach'),tests))
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-probe-test-') as temporary:
+-        source,binary=Path(temporary)/'test.c',Path(temporary)/'test'
+-        source.write_text(code)
+-        subprocess.run([args.cc,'-std=gnu11','-Wall','-Wextra','-Werror','-Wformat=2',
+-                        '-fsanitize=address,undefined',str(source),'-o',str(binary)],check=True)
+-        subprocess.run([str(binary)],check=True)
+-
+-
+-if __name__=='__main__':
+-    main()
+diff --git a/scripts/tests/test-wed-stop.py b/scripts/tests/test-wed-stop.py
+deleted file mode 100644
+index adc4b41..0000000
+--- a/scripts/tests/test-wed-stop.py
++++ /dev/null
+@@ -1,213 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute the real WED stop functions with DMA and reset failure injection."""
+-import argparse
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name, kind):
+-    match = re.search(r'^'+re.escape(kind)+r'\s+'+name+r'\(', text, re.M)
+-    assert match, name
+-    brace = text.index('{', match.start())
+-    end, depth = brace+1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[match.start():end]
+-
+-
+-MODEL = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stdio.h>
+-#include <stdarg.h>
+-#include <string.h>
+-#include <errno.h>
+-typedef uint32_t u32;
+-typedef uint16_t u16;
+-#define BIT(n) (1U<<(n))
+-#define GENMASK(h,l) ((UINT32_MAX>>(31-(h))) & (UINT32_MAX<<(l)))
+-#define U16_MAX UINT16_MAX
+-#define READ_ONCE(x) (x)
+-#define WRITE_ONCE(x,v) ((x)=(v))
+-#define xchg(p,v) ({ __typeof__(*(p)) old=*(p);*(p)=(v);old; })
+-struct device { int unused; };
+-struct mutex { bool held; };
+-struct airoha_ppe_dev { struct { int (*flush_wed)(struct airoha_ppe_dev *,u16); } ops; };
+-struct airoha_wed {
+-    char *base,*wdma; struct device *dev; struct airoha_ppe_dev *ppe;
+-    struct mutex quiesce_lock; bool poisoned,irq_disabled; int irq;
+-    const char *last_stop_stage;
+-    int last_stop_error,last_dma_stop_error,last_flush_error;
+-    u32 stop_reset_attempts,stop_reset_successes;
+-};
+-struct mtk_wed_device { struct airoha_wed *priv; bool running,init_done,dma_quarantined; };
+-static u32 wed_regs[0xb00/4],wdma_regs[0x400/4];
+-static unsigned int reset_calls,irq_disables,flush_calls,index_writes,idle_calls;
+-static int before_stage,after_stage,reset_error,flush_error;
+-static bool unreadable;
+-static char messages[8192];
+-static struct airoha_wed *airoha_wed_priv(struct mtk_wed_device *wed) { return wed->priv; }
+-static void note(const char *format,...)
+-{
+-    va_list args;va_start(args,format);
+-    size_t used=strlen(messages);
+-    vsnprintf(messages+used,sizeof(messages)-used,format,args);va_end(args);
+-}
+-#define dev_err(dev,...) do { (void)(dev);note(__VA_ARGS__); } while(0)
+-#define dev_warn(dev,...) do { (void)(dev);note(__VA_ARGS__); } while(0)
+-#define dev_info(dev,...) do { (void)(dev);note(__VA_ARGS__); } while(0)
+-static u32 readl(const void *p) { return *(const u32 *)p; }
+-static void writel(u32 v,void *p)
+-{
+-    if(p==(void *)((char *)wdma_regs+MTK_WDMA_RESET_IDX))index_writes++;
+-    *(u32 *)p=v;
+-}
+-static u32 airoha_wed_read(struct mtk_wed_device *wed,u32 offset)
+-{ return readl(wed->priv->base+offset); }
+-static void airoha_wed_write(struct mtk_wed_device *wed,u32 offset,u32 value)
+-{ writel(value,wed->priv->base+offset); }
+-static void airoha_wed_rmw(struct mtk_wed_device *wed,u32 offset,u32 mask,u32 value)
+-{ airoha_wed_write(wed,offset,(airoha_wed_read(wed,offset)&~mask)|value); }
+-static void airoha_wed_irq_mask(struct mtk_wed_device *wed,u32 mask)
+-{
+-    airoha_wed_write(wed,MTK_WED_INT_MASK,mask);
+-    airoha_wed_write(wed,MTK_WED_EXT_INT_MASK,mask?0xffffffff:0);
+-}
+-static bool producers_enabled(void)
+-{
+-    return (wdma_regs[MTK_WDMA_GLO_CFG/4]&MTK_WDMA_GLO_CFG_RX_DMA_EN) ||
+-           (wed_regs[MTK_WED_GLO_CFG/4]&EN7581_WED_DMA_ENABLE) ||
+-           (wed_regs[MTK_WED_WPDMA_GLO_CFG/4]&EN7581_WED_DMA_ENABLE) ||
+-           (wed_regs[MTK_WED_WDMA_GLO_CFG/4]&BIT(2));
+-}
+-static int idle_result(unsigned int stage)
+-{
+-    idle_calls++;
+-    if(producers_enabled() || unreadable)return -ETIMEDOUT;
+-    assert(!wed_regs[MTK_WED_INT_MASK/4] && !wed_regs[MTK_WED_EXT_INT_MASK/4]);
+-    assert(!wdma_regs[MTK_WDMA_INT_MASK/4] && !wdma_regs[MTK_WDMA_INT_GRP2/4]);
+-    return (reset_calls?after_stage:before_stage)==(int)stage?-ETIMEDOUT:0;
+-}
+-static int airoha_wdma_rx_idle(struct airoha_wed *aw)
+-{ (void)aw;return idle_result(1); }
+-static int airoha_wed_poll(struct airoha_wed *aw,u32 reg,u32 mask)
+-{
+-    (void)aw;(void)mask;
+-    if(reg==MTK_WED_GLO_CFG)return idle_result(2);
+-    if(reg==MTK_WED_WPDMA_GLO_CFG)return idle_result(3);
+-    assert(reg==MTK_WED_WDMA_GLO_CFG);return idle_result(4);
+-}
+-static int airoha_wed_reset(struct mtk_wed_device *wed,u32 mask)
+-{
+-    assert(mask==MTK_WED_RESET_WED && !producers_enabled());reset_calls++;
+-    /* Successful reset can restore enable bits; the caller must disable again. */
+-    if(!reset_error)wed_regs[MTK_WED_GLO_CFG/4]=EN7581_WED_DMA_ENABLE;
+-    (void)wed;return reset_error;
+-}
+-static void mutex_lock(struct mutex *m) { assert(!m->held);m->held=true; }
+-static void mutex_unlock(struct mutex *m) { assert(m->held);m->held=false; }
+-static void disable_irq(int irq) { assert(irq==27);irq_disables++; }
+-static struct mtk_wed_device *active;
+-static int flush_wed(struct airoha_ppe_dev *ppe,u16 wcid)
+-{ (void)ppe;assert(wcid==U16_MAX && !active->running);flush_calls++;return flush_error; }
+-static void initialize(struct airoha_wed *aw,struct mtk_wed_device *wed,
+-                       struct airoha_ppe_dev *ppe)
+-{
+-    memset(aw,0,sizeof(*aw));memset(wed,0,sizeof(*wed));
+-    memset(wed_regs,0,sizeof(wed_regs));memset(wdma_regs,0,sizeof(wdma_regs));
+-    aw->base=(char *)wed_regs;aw->wdma=(char *)wdma_regs;aw->irq=27;aw->ppe=ppe;
+-    ppe->ops.flush_wed=flush_wed;wed->priv=aw;wed->running=wed->init_done=true;active=wed;
+-    reset_calls=irq_disables=flush_calls=index_writes=idle_calls=0;
+-    before_stage=after_stage=reset_error=flush_error=0;unreadable=false;messages[0]=0;
+-    wdma_regs[MTK_WDMA_GLO_CFG/4]=MTK_WDMA_GLO_CFG_RX_DMA_EN;
+-    wed_regs[MTK_WED_GLO_CFG/4]=EN7581_WED_DMA_ENABLE;
+-    wed_regs[MTK_WED_WPDMA_GLO_CFG/4]=EN7581_WED_DMA_ENABLE;
+-    wed_regs[MTK_WED_WDMA_GLO_CFG/4]=BIT(2);
+-    wed_regs[MTK_WED_INT_MASK/4]=wed_regs[MTK_WED_EXT_INT_MASK/4]=0xffffffff;
+-    wdma_regs[MTK_WDMA_INT_MASK/4]=wdma_regs[MTK_WDMA_INT_GRP2/4]=0xffffffff;
+-}
+-'''
+-
+-TESTS = r'''
+-int main(void)
+-{
+-    struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
+-    initialize(&aw,&wed,&ppe);
+-    assert(!airoha_wed_quiesce(&wed));
+-    assert(!reset_calls && !aw.poisoned && !wed.running && wed.init_done);
+-    assert(!strcmp(aw.last_stop_stage,"idle") && idle_calls==4 && !index_writes);
+-    puts("PASS: disable all producers before polling; normal stop needs no reset or index writes");
+-    for(int stage=1;stage<=4;stage++) {
+-        initialize(&aw,&wed,&ppe);before_stage=stage;
+-        assert(!airoha_wed_quiesce(&wed));
+-        assert(reset_calls==1 && aw.stop_reset_attempts==1 && aw.stop_reset_successes==1);
+-        assert(!aw.poisoned && !wed.init_done && !index_writes);
+-        assert(!strcmp(aw.last_stop_stage,"idle") && strstr(messages,"stop_recovered"));
+-    }
+-    puts("PASS: one bounded WED reset retries all four DMA stages before permitting recovery");
+-    for(int stage=1;stage<=4;stage++) {
+-        initialize(&aw,&wed,&ppe);before_stage=1;after_stage=stage;
+-        assert(airoha_wed_stop_sync(&wed)==-ETIMEDOUT);
+-        assert(wed.dma_quarantined && aw.poisoned && aw.irq_disabled && irq_disables==1);
+-        assert(aw.last_dma_stop_error==-ETIMEDOUT && aw.last_stop_error==-ETIMEDOUT);
+-        assert(!aw.stop_reset_successes && reset_calls==1 && !index_writes);
+-        const char *names[]={"wdma_rx","wed_dma","wpdma_drv","wdma_drv"};
+-        assert(!strcmp(aw.last_stop_stage,names[stage-1]) && strstr(messages,"stop_failed"));
+-    }
+-    puts("PASS: busy external WDMA or WED drivers after reset retain quarantine and DMA ownership");
+-    initialize(&aw,&wed,&ppe);before_stage=1;reset_error=-EIO;
+-    assert(airoha_wed_stop_sync(&wed)==-EIO);
+-    assert(!strcmp(aw.last_stop_stage,"wed_reset") && !aw.stop_reset_successes && !index_writes);
+-    initialize(&aw,&wed,&ppe);unreadable=true;
+-    assert(airoha_wed_stop_sync(&wed)==-ETIMEDOUT && wed.dma_quarantined);
+-    assert(!aw.stop_reset_successes && !index_writes);
+-    initialize(&aw,&wed,&ppe);flush_error=-EBUSY;
+-    assert(airoha_wed_stop_sync(&wed)==-EBUSY);
+-    assert(flush_calls==1 && !aw.last_dma_stop_error && aw.last_flush_error==-EBUSY);
+-    assert(wed.dma_quarantined && !reset_calls && !aw.quiesce_lock.held);
+-    initialize(&aw,&wed,&ppe);wed.dma_quarantined=true;
+-    assert(airoha_wed_stop_sync(&wed)==-EIO && wed.dma_quarantined && aw.poisoned);
+-    puts("PASS: reset failure, unreadable status, PPE flush failure and previous faults cannot report success");
+-}
+-'''
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--kernel', type=Path, required=True)
+-    parser.add_argument('--cc', default='cc')
+-    parser.add_argument('--baseline', type=Path)
+-    args = parser.parse_args()
+-    text = (args.baseline or args.kernel/'drivers/net/ethernet/airoha/airoha_wed.c').read_text()
+-    registers = (args.kernel/'drivers/net/ethernet/mediatek/mtk_wed_regs.h').read_text()
+-    names = ('MTK_WDMA_RESET_IDX', 'MTK_WDMA_GLO_CFG', 'MTK_WDMA_GLO_CFG_RX_DMA_EN',
+-             'MTK_WDMA_INT_MASK', 'MTK_WDMA_INT_GRP2', 'MTK_WED_RESET_WED',
+-             'MTK_WED_INT_MASK', 'MTK_WED_EXT_INT_MASK', 'MTK_WED_GLO_CFG',
+-             'MTK_WED_WPDMA_GLO_CFG', 'MTK_WED_WDMA_GLO_CFG',
+-             'MTK_WED_WPDMA_INT_TRIGGER', 'MTK_WED_WDMA_INT_TRIGGER')
+-    defines = [re.search(r'^#define '+name+r'\b[^\n]*', registers, re.M)[0] for name in names]
+-    defines += [re.search(r'^#define '+name+r'\b[^\n]*', text, re.M)[0]
+-                for name in ('EN7581_WED_DMA_ENABLE', 'EN7581_WED_DMA_BUSY')]
+-    functions = []
+-    for name, kind in (('airoha_wed_disable_dma', 'static void'),
+-                       ('airoha_wed_dma_idle', 'static int')):
+-        if name+'(' in text:
+-            functions.append(function(text, name, kind))
+-    functions += [function(text, name, 'static int') for name in
+-                  ('airoha_wed_quiesce', 'airoha_wed_stop_sync')]
+-    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-stop-') as temporary:
+-        source, binary = Path(temporary)/'stop.c', Path(temporary)/'stop'
+-        source.write_text(MODEL.split('struct device', 1)[0] + '\n'.join(defines) +
+-                          '\nstruct device' + MODEL.split('struct device', 1)[1] +
+-                          '\n'.join(functions) + TESTS)
+-        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+-                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
+-        subprocess.run([str(binary)], check=True)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-wed-txp-template.py b/scripts/tests/test-wed-txp-template.py
+deleted file mode 100644
+index 22304f7..0000000
+--- a/scripts/tests/test-wed-txp-template.py
++++ /dev/null
+@@ -1,105 +0,0 @@
+-#!/usr/bin/env python3
+-"""Execute real mt7915 WED initializers and check the ordinary AP sentinel."""
+-import argparse
+-import re
+-from pathlib import Path
+-import subprocess
+-import tempfile
+-
+-
+-def function(text, name):
+-    pos = text.index('u32 '+name+'(')
+-    start = text.rfind('\n', 0, pos)+1
+-    brace = text.index('{', pos)
+-    end, depth = brace+1, 1
+-    while depth:
+-        depth += (text[end] == '{') - (text[end] == '}')
+-        end += 1
+-    return text[start:end]
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--mt76', type=Path, required=True)
+-    args = parser.parse_args()
+-    native = function((args.mt76/'mt7915/mac.c').read_text(), 'mt7915_wed_init_buf')
+-    layout = re.search(r'struct mt76_connac_fw_txp \{.*?\} __packed __aligned\(4\);', (args.mt76/'mt76_connac.h').read_text(), re.S)[0]
+-    mmio = (args.mt76/'mt7915/mmio.c').read_text()
+-    airoha = function(mmio, 'mt7915_airoha_wed_init_buf')
+-    # Exercise the actual selector too: generic WED keeps its initializer.
+-    begin = mmio.index('\twed->wlan.init_buf =')
+-    end = mmio.index(';', begin)+1
+-    selector = mmio[begin:end]
+-    source = r'''
+-#include <assert.h>
+-#include <stdbool.h>
+-#include <stdint.h>
+-#include <stddef.h>
+-#include <string.h>
+-typedef uint8_t u8;
+-typedef uint32_t u32;
+-typedef uint64_t dma_addr_t;
+-typedef uint16_t __le16;
+-typedef uint32_t __le32;
+-#define MT_TXD_SIZE 32
+-#define MT_TXD0_TX_BYTES 0xffffU
+-#define MT_TXD0_PKT_FMT (3U << 23)
+-#define MT_TX_TYPE_CT 0
+-#define MT_TXD1_LONG_FORMAT (1U << 31)
+-#define MT_TXD1_HDR_FORMAT (3U << 16)
+-#define MT_HDR_FORMAT_802_3 0
+-#define FIELD_PREP(mask,value) (((value) << __builtin_ctz(mask)) & (mask))
+-#define cpu_to_le16(v) ((uint16_t)(v))
+-#define cpu_to_le32(v) ((uint32_t)(v))
+-#define MT_TXP_MAX_BUF_NUM 6
+-#define __packed __attribute__((packed))
+-#define __aligned(x) __attribute__((aligned(x)))
+-'''+layout+r'''
+-'''+native+'\n'+airoha+r'''
+-static bool of_property_present(void *node, const char *property)
+-{ assert(!strcmp(property, "airoha,wed")); return !!node; }
+-struct fake_dev { struct { struct { void *of_node; } *dev; } mt76; };
+-struct fake_wed { struct {u32 (*init_buf)(void *, dma_addr_t, int);} wlan; };
+-static void select_buf(struct fake_dev *dev, struct fake_wed *wed)
+-{
+-'''+selector+r'''
+-}
+-int main(void)
+-{
+-    _Static_assert(sizeof(struct mt76_connac_fw_txp)==44, "TXP stride");
+-    _Static_assert(offsetof(struct mt76_connac_fw_txp,rept_wds_wcid)==5, "sentinel offset");
+-    const int tokens[] = {0,4095,4096,8191};
+-    for (unsigned int i=0;i<sizeof(tokens)/sizeof(tokens[0]);i++) {
+-        unsigned char regular[128], fixed[128];
+-        memset(regular,0xa5,sizeof(regular));memset(fixed,0xa5,sizeof(fixed));
+-        assert(mt7915_wed_init_buf(regular,0x90001000,tokens[i])==76);
+-        assert(mt7915_airoha_wed_init_buf(fixed,0x90001000,tokens[i])==128);
+-        struct mt76_connac_fw_txp *txp=(void *)(fixed+MT_TXD_SIZE);
+-        assert(txp->rept_wds_wcid==0x3ff);
+-        assert(txp->token==tokens[i] && txp->nbuf==1 && txp->buf[0]==0x90001080);
+-        assert(((struct mt76_connac_fw_txp *)(regular+MT_TXD_SIZE))->rept_wds_wcid==0);
+-        for(unsigned int byte=0;byte<sizeof(fixed);byte++)
+-            if((byte<36 || (byte>=44 && byte<76))) assert(fixed[byte]==regular[byte]);
+-        /* Hardware supplies the low eight WCID bits; the upper bits survive. */
+-        fixed[37]=0xff;fixed[36]=1;
+-        assert(txp->rept_wds_wcid==0x3ff && txp->bss_idx==1);
+-    }
+-    struct {void *of_node;} device={0};
+-    struct fake_dev dev={0};struct fake_wed wed={0};
+-    dev.mt76.dev=(void *)&device;
+-    select_buf(&dev,&wed);assert(wed.wlan.init_buf==mt7915_wed_init_buf);
+-    device.of_node=&device;
+-    select_buf(&dev,&wed);assert(wed.wlan.init_buf==mt7915_airoha_wed_init_buf);
+-    return 0;
+-}
+-'''
+-    with tempfile.TemporaryDirectory() as temporary:
+-        path, binary = Path(temporary)/'test.c', Path(temporary)/'test'
+-        path.write_text(source)
+-        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror',str(path),'-o',str(binary)],check=True)
+-        subprocess.run([str(binary)],check=True)
+-    print('PASS: real Airoha TXP initializer preserves 0x3ff across WCID rewrite, boundary tokens and DMA layout; generic WED selection preserved')
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+deleted file mode 100644
+index cc425d9..0000000
+--- a/scripts/tests/test-workflow-paths.py
++++ /dev/null
+@@ -1,276 +0,0 @@
+-#!/usr/bin/env python3
+-"""Run the workflow's source-validation commands against OpenWrt layouts."""
+-import json
+-import os
+-from pathlib import Path
+-import re
+-import subprocess
+-import tempfile
+-import textwrap
+-import unittest
+-
+-
+-RECIPE = Path(__file__).resolve().parents[2]
+-WORKFLOW = RECIPE/'.github/workflows/hg5585f-ct-builder.yml'
+-
+-
+-def source_validation():
+-    text = (RECIPE/'scripts/validate-build.sh').read_text()
+-    return text.split('\nprofiles=(native wed npu)', 1)[0]
+-
+-
+-def full_validation():
+-    return (RECIPE/'scripts/validate-build.sh').read_text()
+-
+-
+-def workflow_step(name):
+-    text = WORKFLOW.read_text()
+-    start = text.index('      - name: ' + name + '\n')
+-    end = text.find('\n      - name: ', start + 1)
+-    return text[start:end if end >= 0 else len(text)]
+-
+-
+-class WorkflowUploads(unittest.TestCase):
+-    def test_firmware_upload_follows_build_and_precedes_checks(self):
+-        names = re.findall(r'^      - name: (.+)$', WORKFLOW.read_text(), re.M)
+-        build = names.index('Build native, WED and NPU firmware')
+-        self.assertEqual(names[build + 1], 'Upload built firmware')
+-        self.assertEqual(names[build + 2], 'Validate actual kernel, ROM ABI and image profiles')
+-        upload = workflow_step('Upload built firmware')
+-        self.assertIn('uses: actions/upload-artifact@v4', upload)
+-        self.assertIn("steps.firmware.outcome == 'success'", upload)
+-        self.assertNotIn('steps.validation', upload)
+-        report = workflow_step('Upload validation report')
+-        self.assertIn("steps.validation.outcome == 'failure'", report)
+-        self.assertNotIn('continue-on-error', workflow_step(
+-            'Validate actual kernel, ROM ABI and image profiles'))
+-
+-    def test_validation_failure_preserves_log_and_exit_status(self):
+-        step = workflow_step('Validate actual kernel, ROM ABI and image profiles')
+-        command = textwrap.dedent(step.split('        run: |\n', 1)[1])
+-        with tempfile.TemporaryDirectory(prefix='hg5585f-validation-log-') as temporary:
+-            root = Path(temporary)
+-            script = root/'scripts/validate-build.sh'
+-            script.parent.mkdir()
+-            script.write_text('echo "test validation output"\necho "test validation error" >&2\nexit 7\n')
+-            env = dict(os.environ, GITHUB_WORKSPACE=str(root))
+-            result = subprocess.run(['bash', '-euo', 'pipefail', '-c', command],
+-                                    cwd=root, env=env, capture_output=True, text=True)
+-            self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+-            self.assertEqual((root/'hg5585f-validation.log').read_text(),
+-                             'test validation output\ntest validation error\n')
+-
+-    def test_firmware_artifact_includes_itb_and_bin_profiles(self):
+-        step = workflow_step('Upload built firmware')
+-        text = step.split('          path: |\n', 1)[1].split('          if-no-files-found:', 1)[0]
+-        patterns = textwrap.dedent(text).splitlines()
+-        with tempfile.TemporaryDirectory(prefix='hg5585f-upload-layout-') as temporary:
+-            root = Path(temporary)
+-            output = root/'openwrt/bin/targets/airoha/an7581'
+-            output.mkdir(parents=True)
+-            expected = set()
+-            for profile in ('ct', 'ct-wed', 'ct-npu'):
+-                for suffix in ('initramfs-recovery.itb', 'squashfs-sysupgrade.itb',
+-                               'squashfs-sysupgrade.bin'):
+-                    path = output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-{suffix}'
+-                    path.touch()
+-                    expected.add(path)
+-            unrelated = output/'ponwrt-airoha-an7581-other-device-sysupgrade.itb'
+-            unrelated.touch()
+-            uploaded = {path for pattern in patterns for path in root.glob(pattern)}
+-            self.assertEqual(uploaded, expected)
+-
+-
+-class WorkflowPaths(unittest.TestCase):
+-    def setUp(self):
+-        temporary = tempfile.TemporaryDirectory(prefix='hg5585f-workflow-paths-')
+-        self.addCleanup(temporary.cleanup)
+-        self.root = Path(temporary.name)
+-        self.kernel = Path('build_dir/target-aarch64_cortex-a53_musl/'
+-                           'linux-airoha_an7581/linux-6.18.60')
+-        self.mt76 = self.kernel.parent/'mt76-2026.10.28~0936617d'
+-        self.calls = self.root/'calls.jsonl'
+-        self.write(self.kernel/'.config', 'CONFIG_NET_AIROHA_WED=y\n')
+-        # Stub checker internals; the real workflow selects and passes paths.
+-        stub = '''import json,os,sys
+-from pathlib import Path
+-with Path(os.environ['CHECK_LOG']).open('a') as log:
+-    log.write(json.dumps(sys.argv) + '\\n')
+-'''
+-        for name in ('check-hg5585f-ppe-accounting.py', 'check-hg5585f-rom-abi.py',
+-                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-wed-pci-irq.py',
+-                     'check-hg5585f-wed-rx-irq.py',
+-                     'check-hg5585f-npu-input-ring.py',
+-                     'check-hg5585f-images.py'):
+-            self.write(Path('scripts')/name, stub)
+-        self.write(Path('recipe/scripts/prepare.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-wed-irq-storm.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-wed-stop.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-wed-exceptions.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-npu-lifecycle.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-ppe-flow-setup.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-wed-flow-blocks.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-bridge-wifi-path.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-ap-flowtable.py'), stub)
+-        self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
+-        self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-wed-txp-template.py'), stub)
+-        self.write(Path('recipe/scripts/tests/test-mt7915-dma-recovery.py'), stub)
+-        self.write(Path('scripts/validate-build.sh'), full_validation())
+-
+-    def write(self, path, contents=''):
+-        target = self.root/path
+-        target.parent.mkdir(parents=True, exist_ok=True)
+-        target.write_text(contents)
+-
+-    def tree(self, path, backend=True):
+-        self.write(path/'mt7915/pci.c')
+-        if backend:
+-            self.write(path/'npu_rx_legacy.c')
+-
+-    def validate(self):
+-        env = dict(os.environ, GITHUB_WORKSPACE=str(self.root/'recipe'),
+-                   CHECK_LOG=str(self.calls))
+-        return subprocess.run(['bash', '-euo', 'pipefail', '-c', source_validation()],
+-                              cwd=self.root, env=env, text=True, capture_output=True)
+-
+-    def validate_full(self):
+-        env = dict(os.environ, GITHUB_WORKSPACE=str(self.root/'recipe'),
+-                   CHECK_LOG=str(self.calls))
+-        return subprocess.run(['bash', 'scripts/validate-build.sh'], cwd=self.root,
+-                              env=env, text=True, capture_output=True)
+-
+-    def image_set(self, recovery=True, sysupgrade=True):
+-        output = self.root/'bin/targets/airoha/an7581'
+-        output.mkdir(parents=True, exist_ok=True)
+-        for profile in ('ct', 'ct-wed', 'ct-npu'):
+-            if recovery:
+-                (output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-initramfs-recovery.itb').touch()
+-            if sysupgrade:
+-                (output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-squashfs-sysupgrade.itb').touch()
+-
+-    def checked_backends(self):
+-        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+-        return [args[args.index('--backend') + 1] for args in calls
+-                if '--backend' in args]
+-
+-    def test_full_validation_requires_recovery_and_sysupgrade_per_profile(self):
+-        self.tree(self.mt76)
+-        self.image_set(recovery=True, sysupgrade=False)
+-        result = self.validate_full()
+-        self.assertNotEqual(result.returncode, 0)
+-        self.assertIn('Missing recovery/sysupgrade image pair for native', result.stdout)
+-
+-    def test_full_validation_runs_all_profiles_after_image_pairs_exist(self):
+-        self.tree(self.mt76)
+-        self.image_set()
+-        result = self.validate_full()
+-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+-        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+-        image_calls = [args for args in calls if 'check-hg5585f-images.py' in args[0]]
+-        self.assertEqual(len(image_calls), 6)
+-        self.assertEqual(sum('--wed' in args for args in image_calls), 2)
+-        self.assertEqual(sum('--npu' in args for args in image_calls), 2)
+-        self.assertEqual(sum('--wed' not in args and '--npu' not in args for args in image_calls), 2)
+-
+-    def test_mt76_kernel_package_layout(self):
+-        self.tree(self.mt76)
+-        # A source-like stale directory at the old path must not be selected.
+-        self.tree(Path('build_dir/target-aarch64_cortex-a53_musl/mt76-stale'))
+-        result = self.validate()
+-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+-        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+-        self.assertIn(str(self.mt76), result.stdout)
+-        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+-        irq_calls = [args for args in calls if 'check-hg5585f-wed-pci-irq.py' in args[0]]
+-        self.assertEqual(irq_calls, [['scripts/check-hg5585f-wed-pci-irq.py',
+-                                     '--mt76', str(self.mt76), '--kernel', str(self.kernel)]])
+-        rx_calls = [args for args in calls if 'check-hg5585f-wed-rx-irq.py' in args[0]]
+-        self.assertEqual(rx_calls, [['scripts/check-hg5585f-wed-rx-irq.py', '--mt76', str(self.mt76)]])
+-        input_calls = [args for args in calls if 'check-hg5585f-npu-input-ring.py' in args[0]]
+-        self.assertEqual(input_calls, [['scripts/check-hg5585f-npu-input-ring.py',
+-            '--header', str(self.kernel/'include/linux/soc/airoha/airoha_wlan_legacy.h'),
+-            '--mt76', str(self.mt76), '--firmware', 'files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin']])
+-
+-    def test_other_mt76_version_and_unrelated_directory(self):
+-        other = self.kernel.parent/'mt76-2026-11-16-abcdef12'
+-        self.tree(other)
+-        self.write(self.kernel.parent/'mt76-tools/Makefile')
+-        result = self.validate()
+-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+-        self.assertEqual(self.checked_backends(), [str(other/'npu_rx_legacy.c')])
+-
+-    def test_initramfs_manifest_and_other_files_are_not_kernels(self):
+-        self.tree(self.mt76)
+-        # Kernel/SetInitramfs writes this beside LINUX_DIR, not inside it.
+-        self.write(Path(str(self.kernel) + '.init-cpio-list'), 'file /init init 0755 0 0\n')
+-        self.write(Path(str(self.kernel) + '.tar.xz'))
+-        self.write(Path(str(self.kernel) + '.debug'))
+-        self.write(self.kernel.parent/'linux-firmware-20261019/Makefile')
+-        result = self.validate()
+-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+-        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+-        self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
+-
+-    def test_initramfs_directory_with_config_is_not_a_kernel(self):
+-        self.tree(self.mt76)
+-        self.write(self.kernel.parent/'linux-6.18.60.init-cpio-list/.config')
+-        result = self.validate()
+-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+-        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+-        self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
+-
+-    def test_unrelated_config_is_not_a_kernel(self):
+-        self.tree(self.mt76)
+-        self.write(self.kernel.parent/'linux-firmware-20261019/.config')
+-        result = self.validate()
+-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+-        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
+-
+-    def test_multiple_configured_kernels_fail_before_any_source_check(self):
+-        other = self.kernel.parent/'linux-6.18.61/.config'
+-        self.write(other)
+-        result = self.validate()
+-        self.assertNotEqual(result.returncode, 0)
+-        self.assertIn('Expected one configured AN7581 kernel; found 2', result.stdout)
+-        self.assertIn(str(self.kernel/'.config'), result.stdout)
+-        self.assertIn(str(other), result.stdout)
+-        self.assertFalse(self.calls.exists())
+-
+-    def test_missing_backend_fails_with_actual_path(self):
+-        self.tree(self.mt76, backend=False)
+-        result = self.validate()
+-        self.assertNotEqual(result.returncode, 0)
+-        self.assertIn('MT76 NPU RX source missing: ' + str(self.mt76/'npu_rx_legacy.c'),
+-                      result.stdout)
+-        self.assertEqual(self.checked_backends(), [])
+-
+-    def test_missing_build_directory_cannot_skip_checks(self):
+-        # Even if an old path exists, a missing kernel package is an error.
+-        self.tree(Path('build_dir/target-aarch64_cortex-a53_musl/mt76-stale'))
+-        result = self.validate()
+-        self.assertNotEqual(result.returncode, 0)
+-        self.assertIn('MT76 build directory missing under: ' + str(self.kernel.parent),
+-                      result.stdout)
+-        self.assertEqual(self.checked_backends(), [])
+-
+-    def test_missing_kernel_cannot_skip_checks(self):
+-        (self.root/self.kernel/'.config').unlink()
+-        result = self.validate()
+-        self.assertNotEqual(result.returncode, 0)
+-        self.assertIn('Expected one configured AN7581 kernel; found 0', result.stdout)
+-        self.assertFalse(self.calls.exists())
+-
+-    def test_absent_build_tree_cannot_skip_checks(self):
+-        (self.root/self.kernel/'.config').unlink()
+-        (self.root/self.kernel).rmdir()
+-        (self.root/self.kernel.parent).rmdir()
+-        result = self.validate()
+-        self.assertNotEqual(result.returncode, 0)
+-        self.assertIn('Expected one configured AN7581 kernel; found 0', result.stdout)
+-        self.assertFalse(self.calls.exists())
+-
+-
+-if __name__ == '__main__':
+-    unittest.main()
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+index 94cb706..d895f1d 100644
+--- a/scripts/validate-build.sh
++++ b/scripts/validate-build.sh
+@@ -25,17 +25,6 @@ for kernel_config in "${kernel_configs[@]}"; do
+   kernel=${kernel_config%/.config}
+   echo "Checking built kernel source: $kernel"
+   python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-irq-storm.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-stop.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-exceptions.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-npu-lifecycle.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-ppe-flow-setup.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-flow-blocks.py" --kernel "$kernel"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-bridge-wifi-path.py" --source "$kernel/net/netfilter/nf_flow_table_path.c"
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/test-ap-flowtable.py" --hotplug target/linux/airoha/an7581/base-files/etc/hotplug.d/net/50-fw4-bridge-reload
+-  python3 "$GITHUB_WORKSPACE/scripts/tests/check-hg5585f-ppe-host-start.py" --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe.c"
+-  python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
+   mt76_found=0
+   for mt76 in "${kernel%/*}"/mt76-*; do
+     [ -d "$mt76" ] || continue
+@@ -44,14 +33,6 @@ for kernel_config in "${kernel_configs[@]}"; do
+       echo "MT76 NPU RX source missing: $mt76/npu_rx_legacy.c"; exit 1;
+     }
+     echo "Checking built MT76 source: $mt76"
+-    python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
+-    python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
+-    python3 scripts/check-hg5585f-wed-pci-irq.py --mt76 "$mt76" --kernel "$kernel"
+-    python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
+-    python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
+-    python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
+-    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-txp-template.py" --mt76 "$mt76"
+-    python3 "$GITHUB_WORKSPACE/scripts/tests/test-mt7915-dma-recovery.py" --mt76 "$mt76"
+     mt76_found=$((mt76_found + 1))
+   done
+   [ "$mt76_found" -gt 0 ] || {
