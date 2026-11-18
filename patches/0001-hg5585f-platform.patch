@@ -1,3 +1,10 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] hg5585f: combine platform, Wi-Fi, WED and NPU foundation
+
+Combine the platform, Wi-Fi, WED and NPU foundation changes into one replayable patch.
+
+Signed-off-by: PonWrt developers <noreply@localhost>
+---
 diff --git a/configs/hg5585f-ct.config b/configs/hg5585f-ct.config
 new file mode 100644
 index 0000000..6bad2c3
@@ -303,6 +310,14 @@ index 0000000..2296b53
 +Ch173 19  17  14  14 18 20 13  9  11  18 19 11 15 13  8  20  20 20 15 14 17  12  19  20 15 16 17 17  12  8  12 16 9 1 3 6 6 3 1 0
 +Ch177 8  17  10  13 12 18 18  18  17  12 10 19 11 8  16  18  13 9 18 13 8  14  11  9 12 14 11 15  13  14  13 19 16 1 3 6 6 3 1 0
 +Ch181 20  19  19  8 12 14 14  12  20  16 13 10 19 11  8  18  10 9 15 11 12  12  14  19 18 18 20 20  14  14  17 14 14 1 3 6 6 3 1 0
+diff --git a/files/etc/config/hg5585f_wifi b/files/etc/config/hg5585f_wifi
+new file mode 100644
+index 0000000..236b3d3
+--- /dev/null
++++ b/files/etc/config/hg5585f_wifi
+@@ -0,0 +1,2 @@
++config diagnostics 'main'
++	option enabled '0'
 diff --git a/files/etc/hotplug.d/firmware/10-mt7916-an-eeprom b/files/etc/hotplug.d/firmware/10-mt7916-an-eeprom
 new file mode 100755
 index 0000000..0a1ef7f
@@ -361,9 +376,32 @@ index 0000000..611e72c
 +            ;;
 +    esac
 +fi
+diff --git a/files/etc/init.d/hg5585f-wifi-diag b/files/etc/init.d/hg5585f-wifi-diag
+new file mode 100755
+index 0000000..a49e0a7
+--- /dev/null
++++ b/files/etc/init.d/hg5585f-wifi-diag
+@@ -0,0 +1,17 @@
++#!/bin/sh /etc/rc.common
++
++# Consumed by /etc/rc.common.
++# shellcheck disable=SC2034
++START=09
++
++start() {
++	/usr/sbin/hg5585f-wifi-diag apply
++}
++
++reload() {
++	start
++}
++
++stop() {
++	/usr/sbin/hg5585f-wifi-diag runtime-off
++}
 diff --git a/files/etc/init.d/mt7916-an-eeprom b/files/etc/init.d/mt7916-an-eeprom
 new file mode 100755
-index 0000000..07019d4
+index 0000000..910a7eb
 --- /dev/null
 +++ b/files/etc/init.d/mt7916-an-eeprom
 @@ -0,0 +1,21 @@
@@ -384,16 +422,16 @@ index 0000000..07019d4
 +	esac
 +
 +	FIRMWARE=mt7916-an-eeprom.bin /bin/sh /etc/hotplug.d/firmware/10-mt7916-an-eeprom || {
-+		logger -t mt7916-an-eeprom "Failed to prepare radio calibration"
++		logger -t hg5585f-wifi "component=eeprom event=calibration_failed"
 +		return 1
 +	}
 +}
 diff --git a/files/etc/uci-defaults/99-hg5585f-hardware b/files/etc/uci-defaults/99-hg5585f-hardware
 new file mode 100755
-index 0000000..937edf3
+index 0000000..f4ec657
 --- /dev/null
 +++ b/files/etc/uci-defaults/99-hg5585f-hardware
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +#!/bin/sh
 +. /lib/functions.sh
 +case "$(board_name)" in
@@ -408,6 +446,7 @@ index 0000000..937edf3
 +commit network
 +UCI
 +/etc/init.d/mt7916-an-eeprom enable
++/etc/init.d/hg5585f-wifi-diag enable
 +exit 0
 diff --git a/files/lib/firmware/airoha/en7581_MT7916_npu_data.bin b/files/lib/firmware/airoha/en7581_MT7916_npu_data.bin
 new file mode 100644
@@ -3275,6 +3314,151 @@ F``?%a%l7~P
 literal 0
 HcmV?d00001
 
+diff --git a/files/usr/sbin/hg5585f-wifi-diag b/files/usr/sbin/hg5585f-wifi-diag
+new file mode 100755
+index 0000000..901230f
+--- /dev/null
++++ b/files/usr/sbin/hg5585f-wifi-diag
+@@ -0,0 +1,139 @@
++#!/bin/sh
++# HG5585F diagnostics: switch lifecycle logging and collect bounded snapshots.
++set -eu
++umask 077
++
++parameter=/sys/module/airoha_npu/parameters/wlan_debug
++
++configured() {
++	value=$(uci -q get hg5585f_wifi.main.enabled 2>/dev/null || true)
++	case "$value" in
++		1|on|true|yes) echo 1 ;;
++		0|off|false|no|'') echo 0 ;;
++		*) echo 'Invalid hg5585f_wifi.main.enabled value' >&2; return 2 ;;
++	esac
++}
++
++runtime() {
++	value=$(cat "$parameter" 2>/dev/null || true)
++	case "$value" in
++		Y|y|1) echo 1 ;;
++		N|n|0) echo 0 ;;
++		*) echo unavailable ;;
++	esac
++}
++
++apply_runtime() {
++	[ -w "$parameter" ] || {
++		printf 'hg5585f-wifi: component=diag event=debug_failed reason=parameter_unavailable\n' >&2
++		return 1
++	}
++	printf '%s\n' "$1" > "$parameter"
++	logger -t hg5585f-wifi "component=diag event=debug enabled=$1" || true
++}
++
++capture() {
++	label=$1
++	shift
++	printf '\nsection=%s\n' "$label"
++	"$@" 2>&1 || printf 'result=unavailable\n'
++}
++
++snapshot() {
++	printf 'format=hg5585f-wifi-diag-v1\n'
++	printf 'configured=%s runtime=%s\n' "$(configured)" "$(runtime)"
++	capture kernel uname -a
++	capture uptime cat /proc/uptime
++	capture interrupts cat /proc/interrupts
++	capture softirqs cat /proc/softirqs
++	capture deferred_devices cat /sys/kernel/debug/devices_deferred
++	capture pci lspci -nnk
++	capture radios iw dev
++	capture regulatory iw reg get
++	for property in model compatible soc/npu@1e900000/firmware-name soc/npu@1e900000/airoha,wlan-firmware-abi; do
++		path=/proc/device-tree/$property
++		[ -r "$path" ] || continue
++		printf '\nsection=device_tree property=%s\n' "$property"
++		tr '\000' '\n' < "$path"
++	done
++	printf '\nsection=radio_config\n'
++	# Read only radio settings; never export wifi-iface encryption keys.
++	for radio in $(uci -q show wireless | sed -n 's/^wireless\.\([^=]*\)=wifi-device$/\1/p'); do
++		case "$radio" in ''|*[!a-zA-Z0-9_]*) continue ;; esac
++		for field in band channel htmode country disabled; do
++			value=$(uci -q get "wireless.$radio.$field" 2>/dev/null || true)
++			printf 'radio=%s field=%s value=%s\n' "$radio" "$field" "${value:-unset}"
++		done
++	done
++	for path in /sys/kernel/debug/ieee80211/phy*/mt76/offload_status; do
++		[ -r "$path" ] || continue
++		capture "$path" cat "$path"
++		# Both PHYs share the same counters and device instance.
++		break
++	done
++	for path in /sys/kernel/debug/airoha-wed /sys/kernel/debug/ppe/config /sys/kernel/debug/ppe/accounting; do
++		[ ! -r "$path" ] || capture "$path" cat "$path"
++	done
++	for interface in $(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2 }'); do
++		case "$interface" in ''|-*|*[!a-zA-Z0-9_.-]*) continue ;; esac
++		capture "stations:$interface" iw dev "$interface" station dump
++	done
++	capture firmware sha256sum /lib/firmware/airoha/en7581*_npu_*.bin
++}
++
++logs() {
++	logread 2>/dev/null | tail -n 2000 |
++		awk '/hg5585f-wifi|hostapd|wpa_supplicant|netifd|mt7915|mt76|airoha.*(npu|wed)/' || true
++}
++
++usage() {
++	echo "Usage: $0 {on|off|status|snapshot|collect [seconds:1-60]}" >&2
++	exit 2
++}
++
++command=${1:-status}
++case "$command" in
++	on|off)
++		[ "$#" -eq 1 ] || usage
++		enabled=0
++		[ "$command" != on ] || enabled=1
++		uci set "hg5585f_wifi.main.enabled=$enabled"
++		uci commit hg5585f_wifi
++		/etc/init.d/hg5585f-wifi-diag enable
++		apply_runtime "$enabled"
++		printf 'hg5585f-wifi: component=diag event=debug enabled=%s persistent=1\n' "$enabled"
++		;;
++	apply)
++		[ "$#" -eq 1 ] || usage
++		apply_runtime "$(configured)"
++		;;
++	runtime-off)
++		[ "$#" -eq 1 ] || usage
++		apply_runtime 0
++		;;
++	status)
++		[ "$#" -le 1 ] || usage
++		printf 'hg5585f-wifi: component=diag event=status configured=%s runtime=%s\n' "$(configured)" "$(runtime)"
++		;;
++	snapshot)
++		[ "$#" -eq 1 ] || usage
++		snapshot
++		;;
++	collect)
++		[ "$#" -le 2 ] || usage
++		period=${2:-15}
++		case "$period" in ''|*[!0-9]*|0*) usage ;; esac
++		[ "$period" -le 60 ] || usage
++		report=$(mktemp -d /tmp/hg5585f-wifi-diag.XXXXXX)
++		snapshot > "$report/before.txt"
++		logs > "$report/log-before.txt"
++		printf 'hg5585f-wifi: component=diag event=collect seconds=%s report=%s\n' "$period" "$report"
++		sleep "$period"
++		snapshot > "$report/after.txt"
++		logs > "$report/log-after.txt"
++		dmesg 2>/dev/null | tail -n 1000 > "$report/kernel.txt" || true
++		tar -C "$report" -czf "$report.tar.gz" .
++		printf 'hg5585f-wifi: component=diag event=collected archive=%s.tar.gz\n' "$report"
++		;;
++	*) usage ;;
++esac
 diff --git a/files/usr/sbin/hg5585f-wifi-offload-check b/files/usr/sbin/hg5585f-wifi-offload-check
 new file mode 100755
 index 0000000..56d0848
@@ -3428,7 +3612,7 @@ index 0000000..a995eb8
 +    esac
 +done
 diff --git a/package/kernel/mt76/Makefile b/package/kernel/mt76/Makefile
-index 777e9d8..76d5572 100644
+index 777e9d8..555b690 100644
 --- a/package/kernel/mt76/Makefile
 +++ b/package/kernel/mt76/Makefile
 @@ -1,7 +1,7 @@
@@ -3436,7 +3620,7 @@ index 777e9d8..76d5572 100644
  
  PKG_NAME:=mt76
 -PKG_RELEASE:=2
-+PKG_RELEASE:=4
++PKG_RELEASE:=5
  
  PKG_LICENSE:=BSD-3-Clause-Clear
  PKG_LICENSE_FILES:=
@@ -6122,6 +6306,631 @@ index 0000000..1946b8c
 ++	q->queued = 0;
 ++	q->stopped = false;
 ++}
+diff --git a/package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch b/package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch
+new file mode 100644
+index 0000000..3b4a83d
+--- /dev/null
++++ b/package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch
+@@ -0,0 +1,437 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] wifi: mt76: recover legacy RX faults and add lifecycle diagnostics
++
++Keep verbose diagnostics off by default and report failures with stage and errno.
++
++diff --git a/mt76.h b/mt76.h
++index 803714e..a248d7f 100644
++--- a/mt76.h
+++++ b/mt76.h
++@@ -740,8 +740,8 @@ struct mt76_mmio {
++ 	int npu_type;
++ 	bool npu_legacy_rx;
++ 	bool npu_quarantined;
++-	atomic_t npu_rx_host_packets;
++-	atomic_t npu_rx_host_errors;
+++	atomic64_t npu_rx_host_packets;
+++	atomic64_t npu_rx_host_errors;
++ 	u32 npu_rx_last_info;
++ 	u32 npu_rx_last_vendor;
++ };
++diff --git a/mt7915/debugfs.c b/mt7915/debugfs.c
++index 1ce9751..765be15 100644
++--- a/mt7915/debugfs.c
+++++ b/mt7915/debugfs.c
++@@ -1317,9 +1317,9 @@ static int mt7915_offload_status_show(struct seq_file *s, void *data)
++ 		   dev->npu_legacy_configured && dev->npu_ppe_forwarding);
++ 	seq_printf(s, "single_hif: %u\nquarantined: %u\n",
++ 		   !dev->hif2, mdev->mmio.npu_quarantined);
++-	seq_printf(s, "host_rx_packets: %d\nhost_rx_errors: %d\n",
++-		   atomic_read(&mdev->mmio.npu_rx_host_packets),
++-		   atomic_read(&mdev->mmio.npu_rx_host_errors));
+++	seq_printf(s, "host_rx_packets: %llu\nhost_rx_errors: %llu\n",
+++		   (u64)atomic64_read(&mdev->mmio.npu_rx_host_packets),
+++		   (u64)atomic64_read(&mdev->mmio.npu_rx_host_errors));
++ 	seq_printf(s, "last_info_word1: %08x\nlast_vendor_word2: %08x\n",
++ 		   READ_ONCE(mdev->mmio.npu_rx_last_info),
++ 		   READ_ONCE(mdev->mmio.npu_rx_last_vendor));
++diff --git a/mt7915/main.c b/mt7915/main.c
++index ecb803b..3424eb0 100644
++--- a/mt7915/main.c
+++++ b/mt7915/main.c
++@@ -357,6 +357,18 @@ int mt7915_set_channel(struct mt76_phy *mphy)
++ 	phy->noise = 0;
++ 
++ out:
+++	if (ret)
+++		dev_err_ratelimited(dev->mt76.dev,
+++			"hg5585f-wifi: component=mt7915 event=channel_failed band=%u frequency=%u width=%d error=%d\n",
+++			(unsigned int)mphy->band_idx,
+++			(unsigned int)(mphy->chandef.chan ? mphy->chandef.chan->center_freq : 0),
+++			cfg80211_chandef_get_width(&mphy->chandef), ret);
+++	else
+++		airoha_wlan_dbg(dev->mt76.dev, "mt7915",
+++			"event=channel_ready band=%u frequency=%u width=%d",
+++			(unsigned int)mphy->band_idx,
+++			(unsigned int)(mphy->chandef.chan ? mphy->chandef.chan->center_freq : 0),
+++			cfg80211_chandef_get_width(&mphy->chandef));
++ 	if (!mt76_testmode_enabled(phy->mt76))
++ 		ieee80211_queue_delayed_work(phy->mt76->hw,
++ 					     &phy->mt76->mac_work,
++@@ -758,8 +770,16 @@ int mt7915_mac_sta_add(struct mt76_dev *mdev, struct ieee80211_vif *vif,
++ 
++ 	if (READ_ONCE(dev->npu_legacy_failed))
++ 		return -EIO;
++-	if (mt7915_npu_legacy_active(dev))
+++	if (mt7915_npu_legacy_active(dev)) {
+++		/* The legacy WLAN mailbox encodes WCID in eight bits. */
+++		if (test_bit(MT_WCID_FLAG_4ADDR, &msta->wcid.flags)) {
+++			dev_err_ratelimited(mdev->dev,
+++				"hg5585f-wifi: component=mt7915 event=station_failed reason=wds_wcid_range error=%d\n",
+++				-EOPNOTSUPP);
+++			return -EOPNOTSUPP;
+++		}
++ 		limit = min_t(int, limit, 256);
+++	}
++ 
++ #ifdef CONFIG_NET_MEDIATEK_SOC_WED
++ 	if (mtk_wed_device_active(&mdev->mmio.wed) && mdev->mmio.wed.airoha &&
++@@ -865,31 +885,36 @@ int mt7915_mac_sta_event(struct mt76_dev *mdev, struct ieee80211_vif *vif,
++ {
++ 	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
++ 	struct mt7915_sta *msta = (struct mt7915_sta *)sta->drv_priv;
++-	int i, ret;
+++	int i, ret = 0;
++ 	u32 addr;
++ 
+++	airoha_wlan_dbg(mdev->dev, "mt7915",
+++		"event=station_begin state=%u band=%u wcid=%u peer=%pM",
+++		(unsigned int)ev, (unsigned int)msta->wcid.phy_idx,
+++		(unsigned int)msta->wcid.idx, sta->addr);
++ 	switch (ev) {
++ 	case MT76_STA_EVENT_ASSOC:
++ 		ret = mt7915_mcu_add_sta(dev, vif, sta, CONN_STATE_CONNECT, true);
++ 		if (ret)
++-			return ret;
+++			goto out;
++ 
++ 		addr = mt7915_mac_wtbl_lmac_addr(dev, msta->wcid.idx, 30);
++ 		mt76_rmw_field(dev, addr, GENMASK(7, 0), 0xa0);
++ 
++ 		ret = mt7915_mcu_add_rate_ctrl(dev, vif, sta, &msta->wcid, false);
++ 		if (ret)
++-			return ret;
+++			goto out;
++ 
++ 		msta->wcid.tx_info |= MT_WCID_TX_INFO_SET;
++ 		msta->wcid.sta = 1;
++ 		msta->wcid.sta_disabled = 0;
++ 
++-		return 0;
+++		break;
++ 
++ 	case MT76_STA_EVENT_AUTHORIZE:
++ 		mt7915_drop_other_sta(dev, vif, sta);
++-		return mt7915_mcu_add_sta(dev, vif, sta, CONN_STATE_PORT_SECURE, false);
+++		ret = mt7915_mcu_add_sta(dev, vif, sta, CONN_STATE_PORT_SECURE, false);
+++		break;
++ 
++ 	case MT76_STA_EVENT_DISASSOC:
++ 		mutex_lock(&dev->mt76.mutex);
++@@ -901,10 +926,18 @@ int mt7915_mac_sta_event(struct mt76_dev *mdev, struct ieee80211_vif *vif,
++ 		msta->wcid.tx_info &= ~MT_WCID_TX_INFO_SET;
++ 		msta->wcid.sta_disabled = 1;
++ 		msta->wcid.sta = 0;
++-		return 0;
+++		break;
++ 	}
++ 
++-	return 0;
+++out:
+++	if (ret)
+++		dev_err_ratelimited(mdev->dev,
+++			"hg5585f-wifi: component=mt7915 event=station_failed state=%u wcid=%u error=%d\n",
+++			(unsigned int)ev, (unsigned int)msta->wcid.idx, ret);
+++	else
+++		airoha_wlan_dbg(mdev->dev, "mt7915", "event=station_ready state=%u wcid=%u",
+++				 (unsigned int)ev, (unsigned int)msta->wcid.idx);
+++	return ret;
++ }
++ 
++ void mt7915_mac_sta_remove(struct mt76_dev *mdev, struct ieee80211_vif *vif,
++@@ -1040,6 +1073,10 @@ mt7915_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++ 	}
++ 	mutex_unlock(&dev->mt76.mutex);
++ 
+++	airoha_wlan_dbg(dev->mt76.dev, "mt7915",
+++		"event=ba state=%u wcid=%u tid=%u window=%u error=%d",
+++		(unsigned int)action, (unsigned int)msta->wcid.idx,
+++		(unsigned int)tid, (unsigned int)params->buf_size, ret);
++ 	return ret;
++ }
++ 
++diff --git a/mt7915/mmio.c b/mt7915/mmio.c
++index 5e4855f..5164961 100644
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -984,8 +984,8 @@ struct mt7915_dev *mt7915_mmio_probe(struct device *pdev,
++ 		return ERR_PTR(-ENOMEM);
++ 
++ 	dev = container_of(mdev, struct mt7915_dev, mt76);
++-	atomic_set(&mdev->mmio.npu_rx_host_packets, 0);
++-	atomic_set(&mdev->mmio.npu_rx_host_errors, 0);
+++	atomic64_set(&mdev->mmio.npu_rx_host_packets, 0);
+++	atomic64_set(&mdev->mmio.npu_rx_host_errors, 0);
++ 
++ 	ret = mt7915_mmio_init(mdev, mem_base, device_id);
++ 	if (ret)
++diff --git a/mt7915/npu_legacy.c b/mt7915/npu_legacy.c
++index 4151bed..aed8a22 100644
++--- a/mt7915/npu_legacy.c
+++++ b/mt7915/npu_legacy.c
++@@ -31,14 +31,17 @@ static void mt7915_npu_legacy_fail(struct mt7915_dev *dev,
++ {
++ 	int q;
++ 
++-	WRITE_ONCE(dev->npu_legacy_failed, true);
+++	/* Both band NAPIs can fault concurrently; queue one recovery only. */
+++	if (xchg(&dev->npu_legacy_failed, true))
+++		return;
++ 	for (q = MT_RXQ_NPU0; q <= MT_RXQ_NPU1; q++) {
++ 		WRITE_ONCE(dev->mt76.q_rx[q].stopped, true);
++ 		airoha_npu_wlan_disable_irq(npu, q - MT_RXQ_NPU0);
++ 	}
++ 	/* Descriptor/page ownership stays with the queues until DMA is quiesced. */
++-	dev_err_ratelimited(dev->mt76.dev, "legacy NPU state synchronization failed: %d\n",
++-			    error);
+++	dev_err_ratelimited(dev->mt76.dev,
+++		"hg5585f-wifi: component=mt7915 event=npu_fault error=%d recovery=%u\n",
+++		error, (unsigned int)READ_ONCE(dev->recovery.hw_init_done));
++ 	if (READ_ONCE(dev->recovery.hw_init_done))
++ 		queue_work(dev->mt76.wq, &dev->reset_work);
++ }
++@@ -140,9 +143,12 @@ bool mt7915_npu_legacy_poll_complete(struct mt76_dev *mdev, enum mt76_rxq_id q)
++ 		return false;
++ 	rcu_read_lock();
++ 	npu = rcu_dereference(mdev->mmio.npu);
++-	if (mt7915_npu_is_legacy(npu) && !READ_ONCE(dev->npu_legacy_failed) &&
++-	    !READ_ONCE(mdev->q_rx[q].stopped))
++-		airoha_npu_wlan_enable_irq(npu, q - MT_RXQ_NPU0);
+++	if (mt7915_npu_is_legacy(npu) && !READ_ONCE(dev->npu_legacy_failed)) {
+++		if (READ_ONCE(mdev->q_rx[q].stopped))
+++			mt7915_npu_legacy_fail(dev, npu, -EIO);
+++		else
+++			airoha_npu_wlan_enable_irq(npu, q - MT_RXQ_NPU0);
+++	}
++ 	rcu_read_unlock();
++ 
++ 	/* NPU queue IDs must never index the chip's native interrupt map. */
++@@ -201,7 +207,7 @@ int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev)
++ 			airoha_npu_wlan_legacy_poison(npu, mdev->dev);
++ 		WRITE_ONCE(dev->npu_legacy_failed, true);
++ 		mdev->mmio.npu_quarantined = true;
++-		dev_err(mdev->dev, "legacy NPU DMA stop failed: %d; memory retained\n", err);
+++		dev_err(mdev->dev, "hg5585f-wifi: component=mt7915 event=dma_stop_failed error=%d dma_memory=retained\n", err);
++ 	}
++ 	dev->npu_legacy_configured = false;
++ 	return err;
++@@ -230,6 +236,8 @@ int mt7915_npu_legacy_rx_setup(struct mt7915_dev *dev, bool initial)
++ 	struct airoha_npu *npu;
++ 	int band, type, err;
++ 
+++	airoha_wlan_dbg(mdev->dev, "mt7915", "event=rx_setup initial=%u ppe=%u",
+++			 (unsigned int)initial, (unsigned int)dev->npu_ppe_forwarding);
++ 	if (!mdev->mmio.npu_legacy_rx)
++ 		return 0;
++ 	if (mdev->mmio.npu_quarantined)
++@@ -291,7 +299,9 @@ int mt7915_npu_legacy_rx_setup(struct mt7915_dev *dev, bool initial)
++ 		if (err)
++ 			return err;
++ 		if (base == 0x457) {
++-			dev_err(mdev->dev, "NPU RX ring %d is not initialized\n", band);
+++			dev_err(mdev->dev,
+++				"hg5585f-wifi: component=mt7915 event=rx_setup_failed stage=firmware_ring band=%d base=0x%08x error=%d\n",
+++				band, base, -EAGAIN);
++ 			return -EAGAIN;
++ 		}
++ 		if ((base & 15) || base < 0x1e800000 ||
++@@ -314,6 +324,9 @@ int mt7915_npu_legacy_rx_setup(struct mt7915_dev *dev, bool initial)
++ 		writel(AIROHA_WLAN_LEGACY_INPUT_COUNT, &input->regs->ring_size);
++ 		writel(AIROHA_WLAN_LEGACY_INPUT_COUNT - 1, &input->regs->cpu_idx);
++ 		writel(0, &input->regs->dma_idx);
+++		airoha_wlan_dbg(mdev->dev, "mt7915",
+++			"event=rx_ring_ready band=%d base=0x%08x input_count=%u host_count=%u",
+++			band, base, AIROHA_WLAN_LEGACY_INPUT_COUNT, (unsigned int)host->ndesc);
++ 	}
++ 	if (dev->npu_ppe_forwarding) {
++ 		/* Table setup and both return queues are ready before forwarding. */
++@@ -325,6 +338,8 @@ int mt7915_npu_legacy_rx_setup(struct mt7915_dev *dev, bool initial)
++ 			return err;
++ 	}
++ 	dev->npu_legacy_configured = true;
+++	airoha_wlan_dbg(mdev->dev, "mt7915", "event=rx_ready ppe=%u hif=%d",
+++			 (unsigned int)dev->npu_ppe_forwarding, type);
++ 	/* Recovery callers schedule each host NAPI after enabling it again. */
++ 	if (initial) {
++ 		for (band = 0; band < 2; band++)
++diff --git a/mt7915/pci.c b/mt7915/pci.c
++index 56aff91..742b274 100644
++--- a/mt7915/pci.c
+++++ b/mt7915/pci.c
++@@ -130,9 +130,12 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 	struct mt7915_dev *dev;
++ 	struct mt76_dev *mdev;
++ 	bool pci_irq = false;
+++	const char *stage = "npu_init";
++ 	int irq;
++ 	int ret;
++ 
+++	airoha_wlan_dbg(&pdev->dev, "mt7915", "event=probe_begin device=0x%04x",
+++			 (unsigned int)pdev->device);
++ 	ret = pcim_enable_device(pdev);
++ 	if (ret)
++ 		return ret;
++@@ -163,6 +166,7 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 	if (ret)
++ 		goto free_device;
++ 
+++	stage = "wed_init";
++ 	ret = mt7915_mmio_wed_init(dev, pdev, true, &irq);
++ 	if (ret < 0)
++ 		goto free_wed_or_irq_vector;
++@@ -179,6 +183,7 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 		if (!mdev->mmio.npu_legacy_rx)
++ 			hif2 = mt7915_pci_init_hif2(pdev);
++ 
+++		stage = "irq_vectors";
++ 		ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
++ 		if (ret < 0) {
++ 			goto free_wed_or_irq_vector;
++@@ -188,6 +193,7 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 		irq = pdev->irq;
++ 	}
++ 
+++	stage = "primary_irq";
++ 	ret = devm_request_irq(mdev->dev, irq, mt7915_irq_handler,
++ 			       IRQF_SHARED, KBUILD_MODNAME, dev);
++ 	if (ret) {
++@@ -208,6 +214,7 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 	/* master switch of PCIe tnterrupt enable */
++ #ifdef CONFIG_NET_MEDIATEK_SOC_WED
++ 	if (mt76_wed_is_airoha(mdev)) {
+++		stage = "wed_irq";
++ 		ret = devm_request_irq(mdev->dev, mdev->mmio.wed.irq,
++ 				       mt7915_irq_handler, IRQF_SHARED,
++ 				       KBUILD_MODNAME "-wed", dev);
++@@ -222,6 +229,7 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 	mt76_wr(dev, MT_PCIE_MAC_INT_ENABLE, 0xff);
++ 
++ 	if (hif2) {
+++		stage = "hif2_irq";
++ 		dev->hif2 = hif2;
++ 
++ 		mt76_wr(dev, MT_INT1_MASK_CSR, 0);
++@@ -239,16 +247,28 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
++ 		dev->hif2_irq_requested = true;
++ 	}
++ 
+++	stage = "register_device";
++ 	ret = mt7915_register_device(dev);
++ 	if (ret)
++ 		goto free_hif2_irq;
++ 
+++	airoha_wlan_dbg(mdev->dev, "mt7915", "event=probe_ready rx=%s wed=%u hif2=%u",
+++			 mdev->mmio.npu_legacy_rx ? "npu" : "native",
+++			 (unsigned int)mtk_wed_device_active(&mdev->mmio.wed),
+++			 (unsigned int)!!hif2);
++ 	return 0;
++ 
++ free_hif2_irq:
++ free_hif2:
++ free_wed_or_irq_vector:
++ free_device:
+++	if (ret != -EPROBE_DEFER)
+++		dev_err(mdev->dev,
+++			"hg5585f-wifi: component=mt7915 event=probe_failed stage=%s error=%d\n",
+++			stage, ret);
+++	else
+++		airoha_wlan_dbg(mdev->dev, "mt7915", "event=probe_deferred stage=%s error=%d",
+++				 stage, ret);
++ 	mt7915_offload_cleanup(dev);
++ 	mt7915_pci_irq_cleanup(dev);
++ 	if (mtk_wed_device_active(&mdev->mmio.wed))
++@@ -272,11 +292,13 @@ static void mt7915_pci_remove(struct pci_dev *pdev)
++ {
++ 	struct mt76_dev *mdev;
++ 	struct mt7915_dev *dev;
+++	struct mt7915_hif *hif2;
++ 
++ 	mdev = pci_get_drvdata(pdev);
++ 	dev = container_of(mdev, struct mt7915_dev, mt76);
++-	mt7915_put_hif2(dev->hif2);
+++	hif2 = dev->hif2;
++ 	mt7915_unregister_device(dev);
+++	mt7915_put_hif2(hif2);
++ }
++ 
++ struct pci_driver mt7915_hif_driver = {
++diff --git a/npu.c b/npu.c
++index eac422b..1b3421e 100644
++--- a/npu.c
+++++ b/npu.c
++@@ -187,13 +187,13 @@ static int mt76_npu_rx_poll(struct napi_struct *napi, int budget)
++ 	mt76_npu_fill_rx_queue(dev, &dev->q_rx[qid]);
++ 	if (dev->mmio.npu_legacy_rx) {
++ 		if (done != errors)
++-			atomic_add(done - errors, &dev->mmio.npu_rx_host_packets);
+++			atomic64_add(done - errors, &dev->mmio.npu_rx_host_packets);
++ 		if (errors)
++-			atomic_add(errors, &dev->mmio.npu_rx_host_errors);
+++			atomic64_add(errors, &dev->mmio.npu_rx_host_errors);
++ 	}
++ out:
++-	if (done < budget && napi_complete(napi) &&
++-	    (!mt76_queue_is_npu_legacy(&dev->q_rx[qid]) || !dev->q_rx[qid].stopped))
+++	/* The chip callback also schedules recovery for a stopped legacy ring. */
+++	if (done < budget && napi_complete(napi))
++ 		dev->drv->rx_poll_complete(dev, qid);
++ 
++ 	rcu_read_unlock();
++@@ -553,7 +553,7 @@ int mt76_npu_legacy_init(struct mt76_dev *dev, phys_addr_t address)
++ 		npu = airoha_npu_get(dev->dev);
++ 	}
++ 	if (IS_ERR(npu))
++-		return PTR_ERR(npu);
+++		return PTR_ERR(npu) == -ENODEV ? -EPROBE_DEFER : PTR_ERR(npu);
++ 	if (!npu)
++ 		return -EOPNOTSUPP;
++ 	if (npu->wlan_abi != AIROHA_NPU_WLAN_ABI_HG5585F_2024 ||
++@@ -581,8 +581,10 @@ int mt76_npu_legacy_init(struct mt76_dev *dev, phys_addr_t address)
++ 	err = airoha_npu_wlan_init_reserved_memory(npu);
++ 	if (err) {
++ 		/* A failed stop retains the supplier and every DMA mapping. */
++-		if (airoha_npu_wlan_legacy_release(npu, dev->dev))
+++		if (airoha_npu_wlan_legacy_release(npu, dev->dev)) {
+++			airoha_ppe_put_dev(ppe);
++ 			return err;
+++		}
++ 		goto put_ppe;
++ 	}
++ 	dev->dma_dev = npu->dev;
++diff --git a/npu_rx_legacy.c b/npu_rx_legacy.c
++index 4508e85..b9c631d 100644
++--- a/npu_rx_legacy.c
+++++ b/npu_rx_legacy.c
++@@ -23,7 +23,7 @@ int mt76_npu_legacy_rx_fill(struct mt76_dev *dev, struct mt76_queue *q)
++ 
++ 		if (e->buf) {
++ 			q->stopped = true;
++-			dev_err_ratelimited(dev->dev, "legacy NPU RX refill owns a live slot\n");
+++			dev_err_ratelimited(dev->dev, "hg5585f-wifi: component=mt76 event=rx_refill_failed reason=live_slot\n");
++ 			break;
++ 		}
++ 		buffer = mt76_get_page_pool_buf(q, &offset, q->buf_size);
++@@ -35,7 +35,7 @@ int mt76_npu_legacy_rx_fill(struct mt76_dev *dev, struct mt76_queue *q)
++ 		    upper_32_bits(address + AIROHA_WLAN_LEGACY_RX_BUF_BYTES - 1)) {
++ 			mt76_put_page_pool_buf(buffer, false);
++ 			q->stopped = true;
++-			dev_err_ratelimited(dev->dev, "legacy NPU RX requires 32-bit DMA\n");
+++			dev_err_ratelimited(dev->dev, "hg5585f-wifi: component=mt76 event=rx_refill_failed reason=dma_address_range\n");
++ 			break;
++ 		}
++ 
++@@ -204,9 +204,11 @@ struct sk_buff *mt76_npu_legacy_rx_dequeue(struct mt76_dev *dev,
++ 		return NULL;
++ 	if (count == -EIO) {
++ 		/* Preserve buffers and descriptors for teardown after DMA is stopped. */
++-		q->stopped = true;
++-		dev_err_ratelimited(dev->dev, "legacy NPU RX invalid ring state\n");
++-		return NULL;
+++		WRITE_ONCE(q->stopped, true);
+++		dev_err_ratelimited(dev->dev,
+++			"hg5585f-wifi: component=mt76 event=rx_ring_fault queue=%d tail=%u producer=%u error=%d\n",
+++			(int)(q - dev->q_rx), q->tail, Q_READ(q, cpu_idx), count);
+++		return ERR_PTR(count);
++ 	}
++ 	if (count < 0) {
++ 		mt76_npu_legacy_rx_retire(dev, q, 1, NULL, NULL);
+diff --git a/package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch b/package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch
+new file mode 100644
+index 0000000..fa87128
+--- /dev/null
++++ b/package/kernel/mt76/patches/123-mt7915-airoha-wed-use-pcie-intx.patch
+@@ -0,0 +1,27 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: use INTx for Airoha WED PCIe completion polling
++
++The Airoha backend polls PCIe INTx status at bit 24. Allowing MSI for the
++primary WLAN HIF leaves WED TX and TX-free completion indices at zero,
++even while MT7916 consumes packets and produces TX-free notifications.
++Require INTx only when attached to Airoha WED. Keep the native MSI/MSI-X
++selection and generic WED vector ownership unchanged.
++
++On HG5585F CT, changing only this selection restores WED completion ring
++progress and allows a Wi-Fi 6 client to discover and associate with the AP.
++
++diff --git a/mt7915/pci.c b/mt7915/pci.c
++--- a/mt7915/pci.c
+++++ b/mt7915/pci.c
++@@ -184,7 +184,10 @@
++ 			hif2 = mt7915_pci_init_hif2(pdev);
++ 
++ 		stage = "irq_vectors";
++-		ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+++		/* Airoha WED polls PCIe INTx to fetch WPDMA completions. */
+++		ret = pci_alloc_irq_vectors(pdev, 1, 1,
+++			mt76_wed_is_airoha(mdev) ? PCI_IRQ_INTX :
+++			PCI_IRQ_ALL_TYPES);
++ 		if (ret < 0) {
++ 			goto free_wed_or_irq_vector;
++ 		}
+diff --git a/package/kernel/mt76/patches/124-mt7915-airoha-wed-native-rx-irq-map.patch b/package/kernel/mt76/patches/124-mt7915-airoha-wed-native-rx-irq-map.patch
+new file mode 100644
+index 0000000..71b0a52
+--- /dev/null
++++ b/package/kernel/mt76/patches/124-mt7915-airoha-wed-native-rx-irq-map.patch
+@@ -0,0 +1,90 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: preserve WED logical events for native Airoha RX
++
++WED can consume the primary PCIe INTx status and report native RX through
++its logical bits 18/19. Forcing the native WPDMA bits 22/23 in the RX queue
++map masks the actual WED event. RX descriptors then complete without NAPI
++being scheduled, filling the ring and eventually blocking association.
++
++Keep the existing MT7916 WED event map, including native HIF2 events when
++present, and translate the primary native mask/status in both directions.
++The RX descriptor rings and packet ownership remain native.
++
++diff --git a/mt7915/dma.c b/mt7915/dma.c
++--- a/mt7915/dma.c
+++++ b/mt7915/dma.c
++@@ -118,14 +118,6 @@
++ 				   MT7915_TXQ_BAND1);
++ 		}
++ 	}
++-
++-	/* WED1 handles TX only. Data RX stays on both native PCIe HIFs. */
++-	if (mt76_wed_is_airoha(&dev->mt76)) {
++-		RXQ_CONFIG(MT_RXQ_MAIN, WFDMA0, MT_INT_RX_DONE_BAND0_MT7916,
++-			   MT7916_RXQ_BAND0);
++-		RXQ_CONFIG(MT_RXQ_BAND1, WFDMA0, MT_INT_RX_DONE_BAND1_MT7916,
++-			   MT7916_RXQ_BAND1);
++-	}
++ }
++ 
++ static void __mt7915_dma_prefetch(struct mt7915_dev *dev, u32 ofs)
++diff --git a/mt7915/mmio.c b/mt7915/mmio.c
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -795,17 +795,40 @@
++ 	return 0;
++ }
++ 
++-/* The native WA event and WED TX-free interrupt both use bit 1. Keep
++- * the native event at its existing WED logical bit 17 in the poll mask.
+++/* WED reports RX through logical bits 18/19 while native WPDMA uses
+++ * bits 22/23. The primary PCIe interrupt can be consumed by WED polling,
+++ * so native RX DMA queues must still listen to the WED logical events.
+++ * Native WA bit 1 is represented by logical bit 17 to avoid TX-free.
++  */
++ static u32 mt7915_airoha_native_irq_mask(u32 mask)
++ {
++ 	u32 native = mask & ~(MT_INT_WED_RX_DONE_WA_MAIN_MT7916 |
++-			      MT_INT_WED_RX_DONE_WA_MT7916);
+++			      MT_INT_WED_RX_DONE_WA_MT7916 |
+++			      MT_INT_WED_RX_DONE_BAND0_MT7916 |
+++			      MT_INT_WED_RX_DONE_BAND1_MT7916);
++ 
++ 	if (mask & MT_INT_WED_RX_DONE_WA_MT7916)
++ 		native |= MT_INT_RX_DONE_WA;
+++	if (mask & MT_INT_WED_RX_DONE_BAND0_MT7916)
+++		native |= MT_INT_RX_DONE_BAND0_MT7916;
+++	if (mask & MT_INT_WED_RX_DONE_BAND1_MT7916)
+++		native |= MT_INT_RX_DONE_BAND1_MT7916;
++ 	return native;
+++}
+++
+++static u32 mt7915_airoha_native_irq_status(struct mt7915_dev *dev, u32 native)
+++{
+++	u32 intr = native & ~(MT_INT_RX_DONE_WA |
+++			      MT_INT_RX_DONE_BAND0_MT7916 |
+++			      MT_INT_RX_DONE_BAND1_MT7916);
+++
+++	if (native & MT_INT_RX_DONE_WA)
+++		intr |= MT_INT_WED_RX_DONE_WA_MT7916;
+++	if (native & MT_INT_RX_DONE_BAND0_MT7916)
+++		intr |= MT_INT_RX(MT_RXQ_MAIN);
+++	if (native & MT_INT_RX_DONE_BAND1_MT7916)
+++		intr |= MT_INT_RX(MT_RXQ_BAND1);
+++	return intr;
++ }
++ 
++ void mt7915_dual_hif_set_irq_mask(struct mt7915_dev *dev,
++@@ -865,11 +888,7 @@
++ 			native = mt76_rr(dev, MT_INT_SOURCE_CSR) &
++ 				 mt7915_airoha_native_irq_mask(dev->mt76.mmio.irqmask);
++ 			mt76_wr(dev, MT_INT_SOURCE_CSR, native);
++-			if (native & MT_INT_RX_DONE_WA) {
++-				native &= ~MT_INT_RX_DONE_WA;
++-				native |= MT_INT_WED_RX_DONE_WA_MT7916;
++-			}
++-			intr |= native;
+++			intr |= mt7915_airoha_native_irq_status(dev, native);
++ 		}
++ 	} else {
++ 		mt76_wr(dev, MT_INT_MASK_CSR, 0);
+diff --git a/package/kernel/mt76/patches/125-mt7915-airoha-npu-preserve-dma-device.patch b/package/kernel/mt76/patches/125-mt7915-airoha-npu-preserve-dma-device.patch
+new file mode 100644
+index 0000000..60643e8
+--- /dev/null
++++ b/package/kernel/mt76/patches/125-mt7915-airoha-npu-preserve-dma-device.patch
+@@ -0,0 +1,22 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: preserve NPU DMA device across WED setup
++
++NPU legacy RX allocates descriptors from the NPU DMA device. WED setup
++overwrote mt76->dma_dev with the WED device immediately before RX queue
++initialization, making the NPU queue reject the devices as mismatched with
++-EINVAL. Keep the NPU owner for the NPU profile and retain the native WED
++assignment for the TX-only profile.
++
++diff --git a/mt7915/mmio.c b/mt7915/mmio.c
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -730,7 +730,8 @@
++ 	}
++ 
++ 	*irq = wed->irq;
++-	dev->mt76.dma_dev = wed->dev;
+++	if (!dev->mt76.mmio.npu_legacy_rx)
+++		dev->mt76.dma_dev = wed->dev;
++ 
++ 	ret = dma_set_mask(wed->dev, DMA_BIT_MASK(32));
++ 	if (ret)
+diff --git a/package/kernel/mt76/patches/126-mt7915-airoha-npu-input-ring-768.patch b/package/kernel/mt76/patches/126-mt7915-airoha-npu-input-ring-768.patch
+new file mode 100644
+index 0000000..6bf1581
+--- /dev/null
++++ b/package/kernel/mt76/patches/126-mt7915-airoha-npu-input-ring-768.patch
+@@ -0,0 +1,19 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: initialize 768 input descriptors for HG5585F NPU RX
++
++The firmware RX loops use a fixed maximum input index of 767. Match its
++768-entry ring rather than stopping at 512 initialized entries. The ABI
++static assertion also checks the kernel header matches this queue size.
++
++diff --git a/mt7915/mt7915.h b/mt7915/mt7915.h
++--- a/mt7915/mt7915.h
+++++ b/mt7915/mt7915.h
++@@ -24,7 +24,7 @@
++ #define MT7915_TX_FWDL_RING_SIZE	128
++ 
++ #define MT7915_RX_RING_SIZE		1536
++-#define MT7915_NPU_RX_RING_SIZE		512
+++#define MT7915_NPU_RX_RING_SIZE		768
++ #define MT7915_RX_MCU_RING_SIZE		512
++ 
++ #define MT7915_FIRMWARE_WA		"mediatek/mt7915_wa.bin"
 diff --git a/scripts/check-hg5585f-images.py b/scripts/check-hg5585f-images.py
 new file mode 100644
 index 0000000..57bee0d
@@ -6222,12 +7031,112 @@ index 0000000..57bee0d
 +
 +if __name__ == '__main__':
 +    main()
+diff --git a/scripts/check-hg5585f-npu-input-ring.py b/scripts/check-hg5585f-npu-input-ring.py
+new file mode 100644
+index 0000000..e1b012e
+--- /dev/null
++++ b/scripts/check-hg5585f-npu-input-ring.py
+@@ -0,0 +1,94 @@
++#!/usr/bin/env python3
++"""Compare input geometry against the verified RV32 firmware's actual wrap code."""
++import argparse
++import hashlib
++from pathlib import Path
++import re
++import struct
++
++FIRMWARE_SHA256 = 'a8757aabc872c31d20683aeb4c05dbb9f7f590bdd6a1102c8a6902385bb5e9a6'
++
++
++def constant(text, name):
++    match = re.search(r'^#define ' + name + r'\s+(\d+)\s*$', text, re.M)
++    assert match, 'Missing numeric definition: ' + name
++    return int(match[1])
++
++
++def firmware_bound(code, offset):
++    word = struct.unpack_from('<I', code, offset)[0]
++    # RV32 ADDI a0,zero,imm; band0/band1 use the same literal upper index.
++    assert word & 0xfffff == 0x00513, hex(word)
++    immediate = word >> 20
++    return immediate - 4096 if immediate & 2048 else immediate
++
++
++def firmware_next(code, current, bound):
++    """Execute 0x8400322a..0x84003234: ADDI, SLTU, ADDI, AND."""
++    registers = [0] * 32
++    registers[9] = current  # s1, firmware consumer
++    registers[10] = bound  # a0
++    offset = 0x322a
++    while offset < 0x3234:
++        half = struct.unpack_from('<H', code, offset)[0]
++        if half & 3 != 3:
++            rd = (half >> 7) & 31
++            if half & 0xe003 == 0x0001:  # C.ADDI
++                immediate = ((half >> 2) & 31) | ((half >> 12) & 1) << 5
++                if immediate & 32:
++                    immediate -= 64
++                registers[rd] = (registers[rd] + immediate) & 0xffffffff
++            elif half & 0xfc63 == 0x8c61:  # C.AND
++                rd, rs2 = 8 + ((half >> 7) & 7), 8 + ((half >> 2) & 7)
++                registers[rd] &= registers[rs2]
++            else:
++                raise AssertionError('Unexpected compressed instruction: ' + hex(half))
++            offset += 2
++        else:
++            word = struct.unpack_from('<I', code, offset)[0]
++            assert word & 0xfe00707f == 0x3033, hex(word)  # SLTU
++            rd, rs1, rs2 = (word >> 7) & 31, (word >> 15) & 31, (word >> 20) & 31
++            registers[rd] = int(registers[rs1] < registers[rs2])
++            offset += 4
++        registers[0] = 0
++    assert offset == 0x3234
++    return registers[9]
++
++
++def first_bad_index(code, capacity, bound):
++    cursor = 0
++    for _ in range(3 * (bound + 1)):
++        if cursor >= capacity:
++            return cursor
++        cursor = firmware_next(code, cursor, bound)
++    return None
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--header', type=Path, required=True)
++    parser.add_argument('--mt76', type=Path, required=True)
++    parser.add_argument('--firmware', type=Path, required=True)
++    args = parser.parse_args()
++    code = args.firmware.read_bytes()
++    assert hashlib.sha256(code).hexdigest() == FIRMWARE_SHA256, 'NPU firmware differs from the audited ROM'
++    bound0, bound1 = firmware_bound(code, 0x3204), firmware_bound(code, 0x344e)
++    assert bound0 == bound1 == 767
++    assert firmware_next(code, 511, bound0) == 512
++    assert firmware_next(code, 767, bound0) == 0
++    assert first_bad_index(code, 512, bound0) == 512  # old driver stalls here
++    header = args.header.read_text()
++    capacity = constant(header, 'AIROHA_WLAN_LEGACY_INPUT_COUNT')
++    queue_size = constant((args.mt76/'mt7915/mt7915.h').read_text(), 'MT7915_NPU_RX_RING_SIZE')
++    assert capacity == queue_size == bound0 + 1, \
++        f'NPU input rings require {bound0+1} entries, got ABI={capacity} MT76={queue_size}'
++    assert first_bad_index(code, capacity, bound0) is None
++    assert constant(header, 'AIROHA_WLAN_LEGACY_RX_DESC_COUNT') == 256
++    setup = (args.mt76/'mt7915/npu_legacy.c').read_text()
++    assert 'writel(AIROHA_WLAN_LEGACY_INPUT_COUNT, &input->regs->ring_size)' in setup
++    assert 'writel(AIROHA_WLAN_LEGACY_INPUT_COUNT - 1, &input->regs->cpu_idx)' in setup
++    print('PASS: stock RV32 consumer passes index 511 and wraps at 768; both input rings match; host return rings remain 256')
++
++
++if __name__ == '__main__':
++    main()
 diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
 new file mode 100644
-index 0000000..76ba2ae
+index 0000000..3375a02
 --- /dev/null
 +++ b/scripts/check-hg5585f-offload.py
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,36 @@
 +#!/usr/bin/env python3
 +"""Check the HG5585F wireless offload patches and matching firmware pair."""
 +import hashlib
@@ -6242,6 +7151,14 @@ index 0000000..76ba2ae
 +    '935-net-airoha-hg5585f-npu-rx-ppe.patch',
 +    '936-dt-bindings-airoha-hg5585f-npu-rx.patch',
 +    '937-net-airoha-hg5585f-hardware-accounting.patch',
++    '938-net-airoha-hg5585f-wifi-diagnostics.patch',
++    '939-net-airoha-fix-wed-gdm-port-and-probe-cleanup.patch',
++    '940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch',
++    '941-net-airoha-mask-wed-extended-interrupts.patch',
++    '942-clk-en7523-fix-reset-control-state.patch',
++    '943-net-airoha-fix-npu-probe-reset-lifecycle.patch',
++    '944-net-airoha-ppe-clear-stale-enable.patch',
++    '945-net-airoha-match-hg5585f-npu-input-ring.patch',
 +)]
 +patches += sorted((root / 'package/kernel/mt76/patches').glob('*.patch'))
 +for patch in patches:
@@ -6678,6 +7595,629 @@ index 0000000..775ef11
 +
 +if __name__ == '__main__':
 +    main()
+diff --git a/scripts/check-hg5585f-wed-pci-irq.py b/scripts/check-hg5585f-wed-pci-irq.py
+new file mode 100644
+index 0000000..850f7c9
+--- /dev/null
++++ b/scripts/check-hg5585f-wed-pci-irq.py
+@@ -0,0 +1,106 @@
++#!/usr/bin/env python3
++"""Exercise the built MT7915 PCI vector path for Airoha, native and generic WED."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def vector_block(text):
++    start = text.index('if (!ret || mt76_wed_is_airoha(mdev))')
++    brace = text.index('{', start)
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76', type=Path, required=True)
++    parser.add_argument('--kernel', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    pci = (args.kernel/'include/linux/pci.h').read_text()
++    names = ('PCI_IRQ_INTX', 'PCI_IRQ_MSI', 'PCI_IRQ_MSIX', 'PCI_IRQ_ALL_TYPES')
++    definitions = [re.search(r'^#define ' + name + r'\s+[^\n]+', pci, re.M).group()
++                   for name in names]
++    code = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++struct pci_dev { int irq; };
++struct mt76_dev { bool airoha; struct { bool npu_legacy_rx; } mmio; };
++struct mt7915_hif { int unused; };
++static unsigned int calls, flags, hif_calls, frees;
++static bool legacy_available;
++static bool mt76_wed_is_airoha(struct mt76_dev *mdev) { return mdev->airoha; }
++static struct mt7915_hif *mt7915_pci_init_hif2(struct pci_dev *pdev)
++{ (void)pdev; hif_calls++; return NULL; }
++/* A PCI device supporting MSI prefers it, as the real PCI core does. */
++static int pci_alloc_irq_vectors(struct pci_dev *pdev, int min, int max, unsigned int mask)
++{
++    assert(min == 1 && max == 1);
++    calls++; flags = mask;
++    if (mask & (PCI_IRQ_MSI | PCI_IRQ_MSIX)) { pdev->irq = 54; return 1; }
++    if ((mask & PCI_IRQ_INTX) && legacy_available) { pdev->irq = 29; return 1; }
++    return -ENOSPC;
++}
++static void pci_free_irq_vectors(struct pci_dev *pdev) { (void)pdev; frees++; }
++static int probe_vector_path(struct pci_dev *pdev, struct mt76_dev *mdev, int ret)
++{
++    struct mt7915_hif *hif2 = NULL;
++    const char *stage = NULL;
++    bool pci_irq = false;
++    int irq = 77; /* IRQ already supplied by a generic WED backend. */
++'''
++    code += vector_block((args.mt76/'mt7915/pci.c').read_text())
++    code += r'''
++    (void)hif2;
++    if (pci_irq) {
++        assert(stage && !strcmp(stage, "irq_vectors"));
++        pci_free_irq_vectors(pdev);
++    }
++    return irq;
++free_wed_or_irq_vector:
++    assert(!pci_irq);
++    return ret;
++}
++static void reset(void) { calls = flags = hif_calls = frees = 0; legacy_available = true; }
++int main(void)
++{
++    struct pci_dev pdev = {0};
++    struct mt76_dev mdev = {.airoha = true};
++    reset();
++    /* WED polls legacy INTx; selecting MSI silently stalls its completion rings. */
++    assert(probe_vector_path(&pdev, &mdev, 1) == 29);
++    assert(calls == 1 && flags == PCI_IRQ_INTX && frees == 1 && hif_calls == 1);
++    reset(); mdev.mmio.npu_legacy_rx = true;
++    assert(probe_vector_path(&pdev, &mdev, 1) == 29);
++    assert(flags == PCI_IRQ_INTX && hif_calls == 0 && frees == 1);
++    reset(); legacy_available = false;
++    assert(probe_vector_path(&pdev, &mdev, 1) == -ENOSPC);
++    assert(calls == 1 && flags == PCI_IRQ_INTX && !frees); /* no MSI fallback */
++    reset(); mdev.airoha = false; mdev.mmio.npu_legacy_rx = false;
++    assert(probe_vector_path(&pdev, &mdev, 0) == 54);
++    assert(flags == PCI_IRQ_ALL_TYPES && frees == 1 && hif_calls == 1);
++    reset();
++    assert(probe_vector_path(&pdev, &mdev, 1) == 77);
++    assert(!calls && !flags && !frees && !hif_calls);
++    puts("PASS: Airoha WED uses INTx, rejects unavailable INTx; native MSI and generic WED vector ownership preserved");
++}
++'''
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-pci-irq-') as temporary:
++        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        source.write_text('\n'.join(definitions) + '\n' + code)
++        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/check-hg5585f-wed-rx-irq.py b/scripts/check-hg5585f-wed-rx-irq.py
+new file mode 100644
+index 0000000..e834d9b
+--- /dev/null
++++ b/scripts/check-hg5585f-wed-rx-irq.py
+@@ -0,0 +1,132 @@
++#!/usr/bin/env python3
++"""Exercise actual MT7916 RX queue/event maps and primary native IRQ translation."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    match = re.search(r'^static (?:void|u32) ' + name + r'\(', text, re.M)
++    assert match, name
++    brace = text.index('{', match.start())
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[match.start():end]
++
++
++def enum(text, name):
++    return re.search(r'enum ' + name + r'\s*\{[\s\S]*?\};', text).group()
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    root = args.mt76
++    header = (root/'mt76.h').read_text()
++    mt7915 = (root/'mt7915/mt7915.h').read_text()
++    regs = (root/'mt7915/regs.h').read_text()
++    dma = function((root/'mt7915/dma.c').read_text(), 'mt7915_dma_config')
++    mmio = (root/'mt7915/mmio.c').read_text()
++    pieces = [r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef uint32_t u32;
++#define BIT(n) (1U << (n))
++#define WFDMA0 0
++#define WFDMA1 1
++''', enum(header, 'mt76_mcuq_id'), enum(header, 'mt76_rxq_id'),
++              enum(mt7915, 'mt7915_txq_id'), enum(mt7915, 'mt7915_rxq_id'),
++              enum(mt7915, 'mt7916_rxq_id')]
++    # Use the real register bit definitions and queue index macros.
++    names = set(re.findall(r'\bMT_INT_[A-Z0-9_]+', dma))
++    names |= {'MT_INT_RX_DONE_BAND0_MT7916', 'MT_INT_RX_DONE_BAND1_MT7916',
++              'MT_INT_RX_DONE_WA', 'MT_INT_WED_RX_DONE_BAND0_MT7916',
++              'MT_INT_WED_RX_DONE_BAND1_MT7916', 'MT_INT_WED_RX_DONE_WA_MT7916',
++              'MT_INT_WED_RX_DONE_WA_MAIN_MT7916'}
++    for name in sorted(names):
++        pieces.append(re.search(r'^#define ' + name + r'\s+[^\n]+', regs, re.M).group())
++    for name in ('__RXQ', '__TXQ', 'MT_INT_RX'):
++        pieces.append(re.search(r'^#define ' + name + r'\([^\n]+', regs, re.M).group())
++    pieces.append(r'''
++struct wed { bool active; };
++struct mt76_dev { int chip; bool airoha; struct { struct wed wed; } mmio; };
++struct mt7915_dev { struct mt76_dev mt76; void *hif2; u32 q_int_mask[64], q_id[64], wfdma_mask; };
++static bool is_mt7915(struct mt76_dev *dev) { return dev->chip == 0x7915; }
++static bool is_mt7916(struct mt76_dev *dev) { return dev->chip == 0x7906; }
++static bool mt76_wed_is_airoha(struct mt76_dev *dev) __attribute__((unused));
++static bool mt76_wed_is_airoha(struct mt76_dev *dev) { return dev->airoha; }
++static bool mtk_wed_device_active(struct wed *wed) { return wed->active; }
++''')
++    pieces += [dma, function(mmio, 'mt7915_airoha_native_irq_mask'),
++               function(mmio, 'mt7915_airoha_native_irq_status')]
++    pieces.append(r'''
++static void wed_case(bool hif2)
++{
++    struct mt7915_dev store = {.mt76 = {.chip = 0x7906, .airoha = true, .mmio.wed.active = true}};
++    struct mt7915_dev *dev = &store;
++    dev->hif2 = hif2 ? dev : NULL;
++    mt7915_dma_config(dev);
++    u32 main = MT_INT_RX(MT_RXQ_MAIN), band1 = MT_INT_RX(MT_RXQ_BAND1);
++    u32 wa = MT_INT_RX(MT_RXQ_MCU_WA), txfree = MT_INT_RX(MT_RXQ_MAIN_WA);
++    assert(main == BIT(18));
++    assert(band1 == (hif2 ? BIT(23) : BIT(19)));
++    assert(wa == BIT(17) && txfree == BIT(1));
++    assert(dev->q_id[__RXQ(MT_RXQ_MAIN)] == MT7916_RXQ_BAND0);
++    assert(dev->q_id[__RXQ(MT_RXQ_BAND1)] == MT7916_RXQ_BAND1);
++
++    /* Real failure: a done RX descriptor and WED status 0x00040000,
++     * masked out when the old Airoha override selected native bit 22.
++     */
++    u32 pending = BIT(18), descriptor = 0xc1db0000;
++    assert(descriptor & BIT(31));
++    assert((pending & main) == pending); /* schedules the native RX NAPI */
++    assert(!(pending & (BIT(22) | BIT(23)))); /* old queue map loses it */
++
++    u32 logical = main | band1 | wa | txfree | BIT(29);
++    u32 native = mt7915_airoha_native_irq_mask(logical);
++    assert(native == (BIT(22) | BIT(23) | BIT(1) | BIT(29)));
++    assert(mt7915_airoha_native_irq_status(dev, native) == (main | band1 | wa | BIT(29)));
++    assert(mt7915_airoha_native_irq_status(dev, BIT(1)) == wa); /* never TX-free */
++    assert(mt7915_airoha_native_irq_status(dev, BIT(22)) == main);
++    assert(mt7915_airoha_native_irq_status(dev, BIT(23)) == band1);
++    assert(!mt7915_airoha_native_irq_status(dev, 0));
++
++    /* NAPI masks/re-enables the same physical cause as it drains the ring. */
++    assert(!(mt7915_airoha_native_irq_mask(logical & ~main) & BIT(22)));
++    assert(mt7915_airoha_native_irq_mask(logical) & BIT(22));
++    assert(!(mt7915_airoha_native_irq_mask(logical & ~wa) & BIT(1)));
++    assert(!(mt7915_airoha_native_irq_mask(txfree) & BIT(1)));
++    assert(!(mt7915_airoha_native_irq_mask(logical & ~(main | band1)) & (BIT(22) | BIT(23))));
++}
++int main(void)
++{
++    wed_case(false); wed_case(true);
++    struct mt7915_dev store = {.mt76.chip = 0x7906};
++    struct mt7915_dev *dev = &store;
++    mt7915_dma_config(dev);
++    assert(MT_INT_RX(MT_RXQ_MAIN) == BIT(22) && MT_INT_RX(MT_RXQ_BAND1) == BIT(23));
++    memset(dev, 0, sizeof(*dev)); dev->mt76.chip = 0x7915;
++    mt7915_dma_config(dev);
++    assert(MT_INT_RX(MT_RXQ_MAIN) == BIT(16) && MT_INT_RX(MT_RXQ_BAND1) == BIT(17));
++    puts("PASS: WED bit 18 wakes native RX; single/dual HIF and WA/TX-free mappings preserve native masking and acknowledgement");
++}
++''')
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-rx-irq-') as temporary:
++        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        source.write_text('\n'.join(pieces))
++        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/check-hg5585f-wifi-diagnostics.py b/scripts/check-hg5585f-wifi-diagnostics.py
+new file mode 100644
+index 0000000..f9b0be7
+--- /dev/null
++++ b/scripts/check-hg5585f-wifi-diagnostics.py
+@@ -0,0 +1,282 @@
++#!/usr/bin/env python3
++"""Exercise wireless fault recovery and the diagnostic switch/report format."""
++import argparse
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    position = text.index(name + '(')
++    start = text.rfind('\n\n', 0, position) + 2
++    brace = text.index('{', position)
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return '\n'.join(line for line in text[start:end].splitlines()
++                     if not line.startswith('#'))
++
++
++def driver_test(mt76, kernel, cc):
++    header = (kernel/'include/linux/soc/airoha/airoha_offload.h').read_text()
++    macro = re.search(r'#define airoha_wlan_dbg[\s\S]*?while \(0\)', header).group()
++    npu = (mt76/'npu.c').read_text()
++    legacy = (mt76/'mt7915/npu_legacy.c').read_text()
++    rx = (mt76/'npu_rx_legacy.c').read_text()
++    prefix = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdarg.h>
++#include <string.h>
++#include <errno.h>
++#include <pthread.h>
++typedef uint32_t u32;
++typedef uint64_t u64;
++typedef u64 phys_addr_t;
++typedef u64 atomic64_t;
++#define EPROBE_DEFER 517
++#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
++#define AIROHA_WLAN_LEGACY_RX_MAX_FRAGS 7
++#define READ_ONCE(v) (v)
++#define WRITE_ONCE(v,x) ((v)=(x))
++#define xchg(p,v) __atomic_exchange_n((p),(v),__ATOMIC_SEQ_CST)
++#define unlikely(v) (v)
++#define PTR_ERR(p) ((int)(intptr_t)(p))
++#define ERR_PTR(e) ((void *)(intptr_t)(e))
++#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
++#define IS_ERR_OR_NULL(p) (!(p) || IS_ERR(p))
++#define upper_32_bits(v) ((u64)(v) >> 32)
++#define rcu_read_lock() do {} while (0)
++#define rcu_read_unlock() do {} while (0)
++#define rcu_dereference(v) (v)
++#define rcu_assign_pointer(v,x) ((v)=(x))
++#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
++enum mt76_rxq_id { MT_RXQ_MAIN, MT_RXQ_BAND1, MT_RXQ_NPU0, MT_RXQ_NPU1 };
++struct sk_buff { int unused; };
++struct napi_struct { void *dev; };
++struct mt76_queue { bool stopped; unsigned int queued,ndesc,tail,cpu_idx; };
++struct airoha_wlan_legacy_rx_meta { u32 total,info,data; };
++struct airoha_npu { unsigned int wlan_abi; void *dev; };
++struct airoha_ppe_dev { struct { int (*prepare_legacy)(struct airoha_ppe_dev *); } ops; };
++struct mt76_dev;
++struct mt76_driver_ops {
++    void (*rx_skb)(struct mt76_dev *,enum mt76_rxq_id,struct sk_buff *,u32 *);
++    void (*rx_poll_complete)(struct mt76_dev *,enum mt76_rxq_id);
++};
++struct mt76_dev {
++    void *dev,*dma_dev,*wq;
++    struct {
++        struct airoha_npu *npu; struct airoha_ppe_dev *ppe_dev;
++        bool npu_legacy_rx; u64 phy_addr;
++        atomic64_t npu_rx_host_packets,npu_rx_host_errors;
++        u32 npu_rx_last_info,npu_rx_last_vendor;
++    } mmio;
++    struct mt76_queue q_rx[4]; struct napi_struct napi[4];
++    struct mt76_driver_ops *drv;
++};
++struct mt7915_dev {
++    struct mt76_dev mt76; bool npu_legacy_failed;
++    struct { bool hw_init_done; } recovery;
++    int reset_work;
++};
++static unsigned int work_calls,enabled_irqs,disabled_irqs;
++static int queue_work(void *wq,int *work) { (void)wq;(void)work;work_calls++;return 1; }
++static void airoha_npu_wlan_enable_irq(struct airoha_npu *npu,int q)
++{ assert(npu && q>=0 && q<2);enabled_irqs++; }
++static void airoha_npu_wlan_disable_irq(struct airoha_npu *npu,int q)
++{ assert(npu && q>=0 && q<2);disabled_irqs++; }
++static void dev_err_ratelimited(void *dev,const char *format,...)
++{ (void)dev;(void)format; }
++static bool debug_enabled;
++static bool airoha_wlan_debug_enabled(void) { return debug_enabled; }
++static void dev_info_ratelimited(void *dev,const char *format,...)
++__attribute__((format(printf,2,3)));
++static char record[512];
++static void dev_info_ratelimited(void *dev,const char *format,...)
++{ (void)dev;va_list args;va_start(args,format);vsnprintf(record,sizeof(record),format,args);va_end(args); }
++static void atomic64_add(int value,atomic64_t *target) { *target += value; }
++static struct mt76_dev *current_dev;
++static struct mt76_dev *mt76_priv(void *dev) { (void)dev;return current_dev; }
++static int napi_complete(struct napi_struct *napi) { (void)napi;return 1; }
++static int peek_result;
++static int mt76_npu_legacy_rx_peek(struct mt76_queue *q,struct airoha_wlan_legacy_rx_meta *meta)
++{ (void)q;(void)meta;return peek_result; }
++#define Q_READ(q,field) ((q)->field)
++static void mt76_npu_legacy_rx_retire(struct mt76_dev *dev,struct mt76_queue *q,
++    unsigned int n,struct sk_buff *skb,const struct airoha_wlan_legacy_rx_meta *meta)
++{ (void)dev;(void)q;(void)n;(void)skb;(void)meta; }
++static struct sk_buff *napi_alloc_skb(struct napi_struct *napi,u32 length)
++{ (void)napi;(void)length;return NULL; }
++static void skb_reset_mac_header(struct sk_buff *skb) { (void)skb; }
++static void mt76_rx_poll_complete(struct mt76_dev *dev,enum mt76_rxq_id q,struct napi_struct *napi)
++{ (void)dev;(void)q;(void)napi; }
++static void mt76_npu_fill_rx_queue(struct mt76_dev *dev,struct mt76_queue *q)
++{ (void)dev;(void)q; }
++static struct airoha_npu *get_result;
++static struct airoha_ppe_dev *ppe_result;
++static int modules,npu_puts,ppe_puts,memory_error,release_error;
++static struct airoha_npu *airoha_npu_get(void *dev) { (void)dev;return get_result; }
++static void request_module(const char *name) { (void)name;modules++; }
++static void airoha_npu_put(struct airoha_npu *npu) { assert(npu);npu_puts++; }
++static struct airoha_ppe_dev *airoha_ppe_get_dev(void *dev) { (void)dev;return ppe_result; }
++static void airoha_ppe_put_dev(struct airoha_ppe_dev *ppe) { assert(ppe);ppe_puts++; }
++static int airoha_npu_wlan_legacy_acquire(struct airoha_npu *npu,void *dev)
++{ (void)npu;(void)dev;return 0; }
++static int airoha_npu_wlan_init_reserved_memory(struct airoha_npu *npu) { (void)npu;return memory_error; }
++static int airoha_npu_wlan_legacy_release(struct airoha_npu *npu,void *dev)
++{ (void)npu;(void)dev;return release_error; }
++static int prepare_ppe(struct airoha_ppe_dev *ppe) { (void)ppe;return 0; }
++'''
++    pieces = [prefix, macro,
++              function(legacy, 'mt7915_npu_is_legacy'),
++              function(legacy, 'mt7915_npu_legacy_fail'),
++              function(legacy, 'mt7915_npu_legacy_poll_complete'),
++              function(rx, 'mt76_npu_legacy_rx_dequeue'),
++              'static struct sk_buff *mt76_npu_dequeue(struct mt76_dev *dev,struct mt76_queue *q,u32 *info)\n{ return mt76_npu_legacy_rx_dequeue(dev,q,info); }',
++              function(npu, 'mt76_npu_rx_poll'),
++              function(npu, 'mt76_npu_legacy_init')]
++    pieces.append(r'''
++static struct airoha_npu *fault_npu;
++static void *fault_thread(void *data)
++{
++    mt7915_npu_legacy_fail(data,fault_npu,-EIO);
++    return NULL;
++}
++int main(void)
++{
++    int evaluated=0;
++    airoha_wlan_dbg(NULL,"test","event=sample error=%d",++evaluated);
++    assert(!evaluated && !record[0]);
++    debug_enabled=true;
++    airoha_wlan_dbg(NULL,"test","event=sample error=%d",++evaluated);
++    assert(evaluated==1 && !strcmp(record,"hg5585f-wifi: component=test event=sample error=1\n"));
++    struct airoha_npu npu={.wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024};
++    struct mt76_driver_ops ops={.rx_poll_complete=mt7915_npu_legacy_poll_complete};
++    /* Its callback returns bool internally; wrap it with the driver's void API. */
++    (void)ops;
++    struct mt7915_dev dev={.recovery.hw_init_done=true};
++    dev.mt76.mmio.npu=&npu;dev.mt76.mmio.npu_legacy_rx=true;
++    assert(!mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_MAIN));
++    assert(mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_NPU0) && enabled_irqs==1);
++    dev.mt76.q_rx[MT_RXQ_NPU0].stopped=true;
++    assert(mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_NPU0));
++    assert(dev.npu_legacy_failed && disabled_irqs==2 && work_calls==1);
++    assert(mt7915_npu_legacy_poll_complete(&dev.mt76,MT_RXQ_NPU1));
++    assert(work_calls==1 && enabled_irqs==1);
++    memset(&dev,0,sizeof(dev));dev.recovery.hw_init_done=true;
++    work_calls=disabled_irqs=0;fault_npu=&npu;
++    pthread_t first,second;
++    assert(!pthread_create(&first,NULL,fault_thread,&dev));
++    assert(!pthread_create(&second,NULL,fault_thread,&dev));
++    assert(!pthread_join(first,NULL) && !pthread_join(second,NULL));
++    assert(work_calls==1 && disabled_irqs==2);
++    get_result=ERR_PTR(-ENODEV);assert(mt76_npu_legacy_init(&dev.mt76,0)==-EPROBE_DEFER && modules==1);
++    get_result=ERR_PTR(-EINVAL);assert(mt76_npu_legacy_init(&dev.mt76,0)==-EINVAL);
++    get_result=&npu;ppe_result=ERR_PTR(-ENODEV);
++    assert(mt76_npu_legacy_init(&dev.mt76,0)==-EPROBE_DEFER && npu_puts==1);
++    struct airoha_ppe_dev ppe={.ops.prepare_legacy=prepare_ppe};ppe_result=&ppe;
++    memory_error=-EIO;release_error=-EIO;npu_puts=ppe_puts=0;
++    assert(mt76_npu_legacy_init(&dev.mt76,0)==-EIO && !npu_puts && ppe_puts==1);
++    return 0;
++}
++''')
++    # The callback type in mt76 is void; preserve that adapter as in mmio.c.
++    pieces.insert(-1, 'static void complete(struct mt76_dev *dev,enum mt76_rxq_id q)\n{ assert(mt7915_npu_legacy_poll_complete(dev,q)); }')
++    pieces[-1] = pieces[-1].replace('.rx_poll_complete=mt7915_npu_legacy_poll_complete', '.rx_poll_complete=complete')
++    pieces[-1] = pieces[-1].replace('    return 0;\n}', r'''
++    memset(&dev,0,sizeof(dev));dev.recovery.hw_init_done=true;
++    dev.mt76.mmio.npu=&npu;dev.mt76.mmio.npu_legacy_rx=true;dev.mt76.drv=&ops;
++    dev.mt76.q_rx[MT_RXQ_NPU0].queued=dev.mt76.q_rx[MT_RXQ_NPU0].ndesc=256;
++    current_dev=&dev.mt76;peek_result=-EIO;work_calls=0;
++    dev.mt76.mmio.npu_rx_host_errors=UINT64_C(2147483648);
++    assert(mt76_npu_rx_poll(&dev.mt76.napi[MT_RXQ_NPU0],4)==1);
++    assert(work_calls==1 && dev.npu_legacy_failed);
++    assert(dev.mt76.mmio.npu_rx_host_errors==UINT64_C(2147483649));
++    assert(!dev.mt76.mmio.npu_rx_host_packets);
++    puts("PASS: stopped RX rings count errors and schedule recovery; supplier deferral and debug formatting");
++    return 0;
++}''')
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wifi-driver-') as temporary:
++        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        source.write_text('\n\n'.join(pieces))
++        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wformat=2', '-pthread',
++                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++def tool_test(root):
++    tool = (root/'files/usr/sbin/hg5585f-wifi-diag').read_text()
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wifi-tool-') as temporary:
++        directory=Path(temporary); commands=directory/'bin';commands.mkdir()
++        parameter=directory/'parameter';parameter.write_text('N\n')
++        state=directory/'state';state.write_text('0')
++        reports=directory/'reports';reports.mkdir()
++        device_tree=directory/'device-tree';device_tree.mkdir()
++        (device_tree/'compatible').write_bytes(b'fiberhome,hg5585f-ct\0airoha,an7581\0')
++        init=directory/'init';init.write_text('#!/bin/sh\nexit 0\n');init.chmod(0o755)
++        mock=commands/'mock'
++        mock.write_text('''#!/usr/bin/env python3
++import os,sys
++from pathlib import Path
++command=Path(sys.argv[0]).name;args=sys.argv[1:];state=Path(os.environ['WIFI_TEST_STATE'])
++if command=='uci':
++    if args[:2]==['-q','get']:
++        key=args[2]
++        if key=='hg5585f_wifi.main.enabled':print(state.read_text().strip())
++        else:print({'band':'5g','channel':'36','htmode':'HE160','country':'CN','disabled':'0'}.get(key.split('.')[-1],''))
++    elif args[:2]==['-q','show']:
++        print("wireless.radio1=wifi-device\\nwireless.ap=wifi-iface\\nwireless.ap.key='SECRET%password'\\n")
++    elif args[0]=='set':state.write_text(args[1].split('=',1)[1])
++elif command=='iw':
++    if args==['dev']:print('phy#1\\n Interface phy1-ap0\\n channel 36 (5180 MHz), width: 160 MHz')
++elif command=='logread':print('hostapd: AP-STA-CONNECTED 00:11:22:33:44:55\\nhg5585f-wifi: component=test event=ready error=0')
++elif command=='dmesg':print('hg5585f-wifi: component=test event=ready error=0')
++elif command in ('logger','sleep'):pass
++''');mock.chmod(0o755)
++        for name in ['uci','iw','logread','dmesg','logger','sleep']:
++            (commands/name).symlink_to(mock)
++        tool=tool.replace('/sys/module/airoha_npu/parameters/wlan_debug',str(parameter))
++        tool=tool.replace('/etc/init.d/hg5585f-wifi-diag',str(init))
++        tool=tool.replace('/tmp/hg5585f-wifi-diag.XXXXXX',str(reports/'hg5585f-wifi-diag.XXXXXX'))
++        tool=tool.replace('/proc/device-tree/',str(device_tree)+'/')
++        executable=directory/'diag';executable.write_text(tool)
++        env=os.environ.copy();env.update(PATH=str(commands)+os.pathsep+env['PATH'],WIFI_TEST_STATE=str(state))
++        def call(*args):
++            return subprocess.run(['sh',str(executable),*args],env=env,capture_output=True,text=True)
++        assert 'configured=0 runtime=0' in call('status').stdout
++        assert call('on').returncode==0 and state.read_text()=='1' and parameter.read_text()=='1\n'
++        snapshot=call('snapshot');assert not snapshot.returncode
++        assert 'SECRET' not in snapshot.stdout and 'field=htmode value=HE160' in snapshot.stdout
++        assert '\0' not in snapshot.stdout and 'fiberhome,hg5585f-ct\nairoha,an7581\n' in snapshot.stdout
++        assert '\\n' not in snapshot.stdout
++        collect=call('collect','1');assert not collect.returncode,collect.stderr
++        archive=Path(re.search(r'archive=(.+)\n',collect.stdout).group(1))
++        assert archive.is_file() and archive.stat().st_mode & 0o077 == 0
++        for path in archive.with_suffix('').with_suffix('').glob('*.txt'):
++            assert 'SECRET' not in path.read_text()
++        assert call('off').returncode==0 and state.read_text()=='0' and parameter.read_text()=='0\n'
++        for invalid in ['0','61','abc','-1']:
++            assert call('collect',invalid).returncode==2
++    print('PASS: persistent on/off, private bounded report, radio fields without passwords and real newlines')
++
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76',type=Path,required=True)
++    parser.add_argument('--kernel',type=Path,required=True)
++    parser.add_argument('--cc',default='cc')
++    args=parser.parse_args()
++    driver_test(args.mt76,args.kernel,args.cc)
++    tool_test(Path(__file__).resolve().parents[1])
++
++
++if __name__=='__main__':
++    main()
+diff --git a/scripts/tests/check-hg5585f-ppe-host-start.py b/scripts/tests/check-hg5585f-ppe-host-start.py
+new file mode 100644
+index 0000000..fa307bc
+--- /dev/null
++++ b/scripts/tests/check-hg5585f-ppe-host-start.py
+@@ -0,0 +1,49 @@
++#!/usr/bin/env python3
++"""Check host-managed PPE takeover of the HG5585F boot-time enable state."""
++import argparse
++from pathlib import Path
++
++
++PPE_BUSY = 1 << 31
++PPE_ENABLE = 1
++
++
++def model(values):
++    writes = []
++    for index, value in enumerate(values):
++        if value & PPE_BUSY:
++            return -16, writes
++        if value & PPE_ENABLE:
++            writes.append(index)
++            values[index] &= ~PPE_ENABLE
++            if values[index] & PPE_BUSY:
++                return -110, writes
++    return 0, writes
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument('--source', type=Path, required=True)
++    args = parser.parse_args()
++    text = args.source.read_text()
++    start = text.index('static int airoha_ppe_host_start(')
++    end = text.index('\n}\n', start) + 2
++    function = text[start:end]
++    assert 'PPE_GLO_CFG_BUSY_MASK' in function
++    assert 'PPE_GLO_CFG_EN_MASK' in function
++    assert 'airoha_fe_clear(eth, REG_PPE_GLO_CFG(i), PPE_GLO_CFG_EN_MASK)' in function
++    assert 'read_poll_timeout(airoha_fe_rr' in function
++    assert function.index('airoha_fe_clear') < function.index('ppe->host_started = true')
++
++    values = [0x0006070f, 0x0006070f]
++    result, writes = model(values)
++    assert result == 0 and writes == [0, 1] and values == [0x0006070e, 0x0006070e]
++    result, writes = model([PPE_BUSY, 0])
++    assert result == -16 and writes == []
++    result, writes = model([0, 0])
++    assert result == 0 and writes == []
++    print('PASS: host-managed PPE clears stale enable bits, rejects busy ownership and preserves clean state')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/check-npu-dma-device.py b/scripts/tests/check-npu-dma-device.py
+new file mode 100644
+index 0000000..88dd804
+--- /dev/null
++++ b/scripts/tests/check-npu-dma-device.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python3
++"""Check NPU RX keeps its DMA owner when WED is initialized."""
++import argparse
++from pathlib import Path
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument('--source', type=Path, required=True)
++    args = parser.parse_args()
++    text = args.source.read_text()
++    start = text.index('int mt7915_mmio_wed_init(')
++    end = text.index('\n}\n', start) + 2
++    function = text[start:end]
++    assignment = '\tdev->mt76.dma_dev = wed->dev;'
++    assert function.count(assignment) == 1
++    guard = function.index('if (!dev->mt76.mmio.npu_legacy_rx)')
++    assert guard < function.index(assignment)
++    assert function[guard:function.index(assignment)+len(assignment)].count('dma_dev') == 1
++    print('PASS: NPU RX keeps its DMA owner while native WED receives the WED DMA device')
++
++
++if __name__ == '__main__':
++    main()
 diff --git a/scripts/tests/hg5585f-rom-accounting.json b/scripts/tests/hg5585f-rom-accounting.json
 new file mode 100644
 index 0000000..c7455c8
@@ -6770,6 +8310,1002 @@ index 0000000..f2fb42d
 +    }
 +  ]
 +}
+diff --git a/scripts/tests/test-npu-lifecycle.py b/scripts/tests/test-npu-lifecycle.py
+new file mode 100644
+index 0000000..93e08e3
+--- /dev/null
++++ b/scripts/tests/test-npu-lifecycle.py
+@@ -0,0 +1,239 @@
++#!/usr/bin/env python3
++"""Exercise reset polarity/errors, deferred firmware and reset-held GDMA teardown."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    match = re.search(r'^static int\s+' + name + r'\([^;]*?\)\n\{', text, re.M)
++    assert match, name
++    brace = text.index('{', match.start())
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[match.start():end]
++
++
++def run_c(cc, code):
++    with tempfile.TemporaryDirectory(prefix='hg5585f-npu-lifecycle-') as temporary:
++        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        source.write_text(code)
++        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wformat=2',
++                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++def reset_test(text, cc):
++    prefix = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <errno.h>
++typedef uint32_t u32;
++#define BIT(n) (1U << (n))
++#define RST_NR_PER_BANK 32
++#define REG_NP_SCU_PCIC 0x88
++#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
++struct reset_controller_dev { int unused; };
++struct regmap { u32 regs[64]; int read_error,write_error; };
++struct en_rst_data { struct reset_controller_dev rcdev; u32 bank_ofs[3]; struct regmap *map; };
++static int regmap_update_bits(struct regmap *map,u32 offset,u32 mask,u32 value)
++{ if(map->write_error)return map->write_error;map->regs[offset/4]=(map->regs[offset/4]&~mask)|(value&mask);return 0; }
++static int regmap_read(struct regmap *map,u32 offset,u32 *value)
++{ if(map->read_error)return map->read_error;*value=map->regs[offset/4];return 0; }
++'''
++    tests = r'''
++int main(void)
++{
++    struct regmap map={0};
++    struct en_rst_data reset={.bank_ofs={0,4,REG_NP_SCU_PCIC},.map=&map};
++    const unsigned long ids[]={9,32+14,64+3};
++    for(unsigned int i=0;i<sizeof(ids)/sizeof(ids[0]);i++) {
++        unsigned long id=ids[i];u32 offset=reset.bank_ofs[id/32],bit=BIT(id%32);
++        u32 neighbours=0xa5a5a5a5&~bit;
++        map.regs[offset/4]=neighbours|(offset==REG_NP_SCU_PCIC?bit:0);
++        assert(en7523_reset_status(&reset.rcdev,id)==0);
++        assert(!en7523_reset_update(&reset.rcdev,id,true));
++        assert(en7523_reset_status(&reset.rcdev,id)==1);
++        assert((map.regs[offset/4]&~bit)==neighbours);
++        assert(!en7523_reset_update(&reset.rcdev,id,false));
++        assert(en7523_reset_status(&reset.rcdev,id)==0);
++        assert((map.regs[offset/4]&~bit)==neighbours);
++    }
++    map.write_error=-EIO;
++    assert(en7523_reset_update(&reset.rcdev,9,true)==-EIO);
++    map.read_error=-EIO;
++    assert(en7523_reset_status(&reset.rcdev,9)==-EIO);
++    puts("PASS: NPU/GDMA and inverted PCIC resets preserve neighbours, deassert deterministically and propagate regmap errors");
++}
++'''
++    run_c(cc, prefix + function(text, 'en7523_reset_update') + '\n' +
++          function(text, 'en7523_reset_status') + tests)
++
++
++def lifecycle_test(text, cc):
++    prefix = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++#include <errno.h>
++typedef uint32_t u32;
++#define BIT(n) (1U<<(n))
++#define ARRAY_SIZE(a) ((int)(sizeof(a)/sizeof((a)[0])))
++#define EPROBE_DEFER 517
++#define WRITE_ONCE(a,b) ((a)=(b))
++#define lockdep_assert_held(p) assert(*(p))
++#define NPU_NUM_CORES 8
++#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
++#define REG_CR_MBOX_INT_STATUS 0
++#define MBOX_INT_STATUS_MASK BIT(8)
++#define REG_IRQ_RXDONE(n) (4+(n)*4)
++#define NPU_IRQ_RX_MASK(n) BIT(16+(n))
++#define REG_WDT_TIMER_CTRL(n) (16+(n)*4)
++#define WDT_INTR_MASK BIT(21)
++#define LEGACY_GDMA_CTRL0(n) (8+((n)<<4))
++#define LEGACY_RX_COPY_CHANNEL 3
++#define LEGACY_GDMA_BUSY BIT(1)
++#define NPU_EN7581_FIRMWARE_RV32_MAX_SIZE 0x200000
++#define NPU_EN7581_FIRMWARE_DATA_MAX_SIZE 0x10000
++#define airoha_wlan_dbg(dev,...) do { (void)(dev); } while(0)
++enum airoha_npu_legacy_state { LEGACY_STOPPED,LEGACY_RUNNING,LEGACY_FAULT };
++struct reset_control { int state,write_error,read_error; bool stuck; };
++struct device { void *of_node; };
++struct firmware { size_t size; };
++struct airoha_npu_legacy {
++    int lock,state,mbox_irq,work_count,wdt_irq[8];bool blocked;
++    struct reset_control *npu_reset,*gdma_reset;char *gdma;
++};
++struct airoha_npu_core { int lock,wdt_work; };
++struct airoha_npu { struct airoha_npu_legacy *legacy;struct airoha_npu_core cores[8];
++                    struct device *dev;int irqs[2];void *regmap;int wlan_abi; };
++static struct reset_control resets[2];
++static int npu_mmio,gdma_reads,reset_writes,drain_error,syncs,cancels,requests,releases;
++static int fw_error_at,fw_error,fw_names_count;
++static size_t fw_sizes[2];
++static void spin_lock_bh(int *lock) { (*lock)++; }
++static void spin_unlock_bh(int *lock) { assert(*lock);(*lock)--; }
++static int reset_control_status(struct reset_control *reset)
++{ return reset->read_error?reset->read_error:reset->state; }
++static int reset_control_assert(struct reset_control *reset)
++{ reset_writes++;if(reset->write_error)return reset->write_error;if(!reset->stuck)reset->state=1;return 0; }
++static int reset_control_deassert(struct reset_control *reset)
++{ reset_writes++;if(reset->write_error)return reset->write_error;if(!reset->stuck)reset->state=0;return 0; }
++#define read_poll_timeout(op,val,cond,delay,timeout,first,arg) ({ \
++    int result=-ETIMEDOUT;for(int poll=0;poll<32;poll++){val=op(arg);if(cond){result=0;break;}}result; })
++static void regmap_write(void *map,u32 offset,u32 value)
++{ (void)map;(void)offset;(void)value;assert(resets[0].state==0);npu_mmio++; }
++#define regmap_clear_bits regmap_write
++#define regmap_set_bits regmap_write
++static int gdma_poll(u32 *value)
++{ assert(resets[1].state==0);assert(resets[0].state==1);gdma_reads++;*value=0;return drain_error; }
++#define readl_poll_timeout(addr,value,cond,delay,timeout) ((void)(addr),gdma_poll(&(value)))
++static void synchronize_irq(int irq) { assert(irq>=0);syncs++; }
++static void cancel_work_sync(int *work) { (void)work;cancels++; }
++static int of_property_read_string_array(void *node,const char *property,const char **names,int count)
++{ (void)node;(void)property;assert(count==2);names[0]="rv32";names[1]="data";return fw_names_count; }
++static int request_firmware_direct(const struct firmware **fw,const char *name,struct device *dev)
++{
++    static struct firmware result;
++    (void)name;(void)dev;assert(!reset_writes&&!npu_mmio&&!gdma_reads);
++    requests++;if(requests==fw_error_at)return fw_error;
++    result.size=fw_sizes[requests-1];*fw=&result;return 0;
++}
++static void release_firmware(const struct firmware *fw) { assert(fw);releases++; }
++static int dev_err_probe(struct device *dev,int error,const char *format,...)
++{ (void)dev;(void)format;return error; }
++static void setup(struct airoha_npu *npu,struct airoha_npu_legacy *legacy,int npu_state,int dma_state)
++{
++    static struct device device;static char gdma[0x2b0];
++    memset(npu,0,sizeof(*npu));memset(legacy,0,sizeof(*legacy));memset(resets,0,sizeof(resets));
++    resets[0].state=npu_state;resets[1].state=dma_state;
++    legacy->lock=1;legacy->state=LEGACY_RUNNING;legacy->npu_reset=&resets[0];legacy->gdma_reset=&resets[1];
++    legacy->gdma=gdma;legacy->mbox_irq=-1;
++    for(int i=0;i<8;i++)legacy->wdt_irq[i]=-1;
++    npu->legacy=legacy;npu->dev=&device;npu->wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024;
++    npu_mmio=gdma_reads=reset_writes=drain_error=syncs=cancels=requests=releases=0;
++    fw_error_at=0;fw_error=-ENOENT;fw_names_count=2;fw_sizes[0]=4096;fw_sizes[1]=8192;
++}
++'''
++    tests = r'''
++int main(void)
++{
++    struct airoha_npu npu;struct airoha_npu_legacy legacy;
++    /* Reproduce probe retry with either/both blocks already in reset. */
++    for(int n=0;n<2;n++)for(int d=0;d<2;d++) {
++        setup(&npu,&legacy,n,d);
++        assert(!airoha_npu_legacy_stop(&npu));
++        assert(legacy.state==LEGACY_STOPPED&&legacy.blocked);
++        assert(resets[0].state==1&&resets[1].state==1);
++        assert(gdma_reads==!d&&npu_mmio==(!n?11:0));
++        int reads=gdma_reads,writes=reset_writes;
++        assert(!airoha_npu_legacy_stop(&npu)&&gdma_reads==reads&&reset_writes==writes);
++    }
++    setup(&npu,&legacy,0,0);drain_error=-ETIMEDOUT;
++    assert(airoha_npu_legacy_stop(&npu)==-ETIMEDOUT&&legacy.state==LEGACY_FAULT&&legacy.blocked&&resets[1].state==1);
++    setup(&npu,&legacy,0,0);resets[1].read_error=-EIO;
++    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads);
++    setup(&npu,&legacy,1,1);resets[0].read_error=-EIO;
++    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads&&!npu_mmio);
++    setup(&npu,&legacy,0,0);resets[0].write_error=-EIO;
++    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&!gdma_reads&&resets[1].state==1);
++    setup(&npu,&legacy,0,0);resets[1].write_error=-EIO;
++    assert(airoha_npu_legacy_stop(&npu)==-EIO&&legacy.state==LEGACY_FAULT&&legacy.blocked);
++    setup(&npu,&legacy,1,1);
++    assert(!airoha_npu_deassert_reset(&resets[1])&&resets[1].state==0);
++    resets[1].state=1;resets[1].stuck=true;
++    assert(airoha_npu_deassert_reset(&resets[1])==-ETIMEDOUT);
++    resets[1].stuck=false;resets[1].read_error=-EIO;
++    assert(airoha_npu_deassert_reset(&resets[1])==-EIO);
++    resets[1].write_error=-EINVAL;
++    assert(airoha_npu_deassert_reset(&resets[1])==-EINVAL);
++    puts("PASS: deferred/repeated stop never reads reset-held NPU/GDMA; timeouts/errors retain fault and block state; deassert is verified");
++
++    setup(&npu,&legacy,1,1);fw_error_at=1;
++    assert(airoha_npu_legacy_firmware_ready(&npu)==-EPROBE_DEFER&&requests==1&&!releases&&!reset_writes);
++    setup(&npu,&legacy,1,1);fw_error_at=2;
++    assert(airoha_npu_legacy_firmware_ready(&npu)==-EPROBE_DEFER&&requests==2&&releases==1&&!reset_writes);
++    setup(&npu,&legacy,1,1);fw_error_at=1;fw_error=-EIO;
++    assert(airoha_npu_legacy_firmware_ready(&npu)==-EIO&&!reset_writes);
++    setup(&npu,&legacy,1,1);fw_sizes[0]=0x200001;
++    assert(airoha_npu_legacy_firmware_ready(&npu)==-E2BIG&&releases==1);
++    setup(&npu,&legacy,1,1);fw_sizes[1]=0;
++    assert(airoha_npu_legacy_firmware_ready(&npu)==-EINVAL&&releases==2);
++    setup(&npu,&legacy,1,1);
++    assert(!airoha_npu_legacy_firmware_ready(&npu)&&requests==2&&releases==2&&!reset_writes);
++    setup(&npu,&legacy,1,1);npu.wlan_abi=0;
++    assert(!airoha_npu_legacy_firmware_ready(&npu)&&!requests);
++    puts("PASS: legacy firmware is checked before hardware ownership; missing pairs defer with no reset/DMA/MMIO side effects");
++}
++'''
++    names = ('airoha_npu_assert_reset', 'airoha_npu_deassert_reset',
++             'airoha_npu_legacy_stop', 'airoha_npu_legacy_firmware_ready')
++    run_c(cc, prefix + '\n'.join(function(text, name) for name in names) + tests)
++    probe = function(text, 'airoha_npu_probe')
++    assert probe.index('airoha_npu_legacy_firmware_ready') < probe.index('airoha_npu_legacy_init')
++    boot = function(text, 'airoha_npu_boot')
++    assert boot.index('airoha_npu_deassert_reset(legacy->gdma_reset)') < boot.index('writel(0, legacy->gdma')
++    assert boot.index('airoha_npu_deassert_reset(legacy->npu_reset)') < boot.index('REG_RX_BASE')
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--kernel', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    reset_test((args.kernel/'drivers/clk/clk-en7523.c').read_text(), args.cc)
++    lifecycle_test((args.kernel/'drivers/net/ethernet/airoha/airoha_npu.c').read_text(), args.cc)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-storm.py
+new file mode 100644
+index 0000000..73774e7
+--- /dev/null
++++ b/scripts/tests/test-wed-irq-storm.py
+@@ -0,0 +1,195 @@
++#!/usr/bin/env python3
++"""Exercise WED normal/extended IRQ masking, W1C acknowledgement and storm protection."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name, kind='static void'):
++    match = re.search(r'^' + re.escape(kind) + r' ' + re.escape(name) + r'\(', text, re.M)
++    assert match, name
++    brace = text.index('{', match.start())
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[match.start():end]
++
++
++PREFIX = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef uint32_t u32;
++#define BIT(n) (1U << (n))
++typedef struct { int v; } atomic_t;
++#define HZ 100
++#define READ_ONCE(x) (x)
++#define WRITE_ONCE(x, v) ((x) = (v))
++#define time_after(a, b) ((long)((b) - (a)) < 0)
++static unsigned long jiffies;
++static int atomic_read(const atomic_t *a) { return a->v; }
++static void atomic_set(atomic_t *a, int v) { a->v = v; }
++static int atomic_inc_return(atomic_t *a) { return ++a->v; }
++static int atomic_cmpxchg(atomic_t *a, int o, int n) { int r = a->v; if (r == o) a->v = n; return r; }
++#define cmpxchg(p, o, n) ({ __typeof__(*(p)) _r = *(p); if (_r == (o)) *(p) = (n); _r; })
++struct device { int unused; };
++struct airoha_wed { struct device *dev; u32 regs[0xb00 / sizeof(u32)]; int irq; bool irq_disabled, poisoned;
++                    atomic_t irq_count, irq_storm; unsigned long irq_window; };
++struct mtk_wed_device { struct airoha_wed *priv; struct device *dev; };
++static struct airoha_wed *airoha_wed_priv(struct mtk_wed_device *w) { return w->priv; }
++static int disables, errors, exceptions, mask_writes;
++static u32 readl_reg(struct airoha_wed *aw, u32 off) { return aw->regs[off / 4]; }
++static void writel_reg(struct airoha_wed *aw, u32 v, u32 off)
++{
++    if (off == MTK_WED_INT_STATUS || off == MTK_WED_EXT_INT_STATUS)
++        aw->regs[off / 4] &= ~v; /* hardware write-one-to-clear status */
++    else
++        aw->regs[off / 4] = v;
++}
++static u32 readl(const char *addr) { return *(const u32 *)addr; }
++static void writel(u32 v, char *addr) { *(u32 *)addr = v; }
++static void disable_irq_nosync(int irq) { (void)irq; disables++; }
++static void note(const char *f, ...) { (void)f; errors++; }
++#define dev_err(dev, ...) do { (void)(dev); note(__VA_ARGS__); } while (0)
++#define dev_warn_ratelimited(dev, ...) do { (void)(dev); exceptions++; } while (0)
++#define airoha_wlan_dbg(dev, ...) do { (void)(dev); } while (0)
++
++static void airoha_wed_write(struct mtk_wed_device *w, u32 off, u32 v) { writel_reg(w->priv, v, off); mask_writes++; }
++static u32 airoha_wed_read(struct mtk_wed_device *w, u32 off) { return readl_reg(w->priv, off); }
++'''
++# aw->base is used as a plain offset base in the real code: model it as 0.
++PREFIX = PREFIX.replace('struct airoha_wed { struct device *dev;', 'struct airoha_wed { struct device *dev; char *base;')
++
++TESTS = r'''
++#define LIMIT AIROHA_WED_IRQ_STORM_LIMIT
++static bool irq_asserted(struct airoha_wed *aw)
++{
++    return (aw->regs[MTK_WED_INT_STATUS / 4] & aw->regs[MTK_WED_INT_MASK / 4]) ||
++           (aw->regs[MTK_WED_EXT_INT_STATUS / 4] & aw->regs[MTK_WED_EXT_INT_MASK / 4]);
++}
++static void mask_and_ack_tests(void)
++{
++    struct device dev;
++    struct airoha_wed aw = {.dev = &dev, .irq = 7};
++    struct mtk_wed_device wed = {.priv = &aw};
++    const u32 ext_error = MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
++    aw.base = (char *)aw.regs;
++    jiffies = 1000;
++    assert(ext_error == 0x00080000 && (EN7581_WED_EXT_ERRORS & ext_error));
++
++    /* Reproduce the device report: no normal event, only extended bit 19. */
++    aw.regs[MTK_WED_EXT_INT_MASK / 4] = EN7581_WED_EXT_ERRORS;
++    airoha_wed_irq_mask(&wed, 0x20);
++    aw.regs[MTK_WED_EXT_INT_STATUS / 4] = ext_error;
++    assert(irq_asserted(&aw));
++    airoha_wed_irq_mask(&wed, 0);
++    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0);
++    assert(aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
++    assert(!irq_asserted(&aw)); /* hard IRQ leaves time for its tasklet */
++    assert(aw.regs[MTK_WED_EXT_INT_STATUS / 4] == ext_error);
++    assert(airoha_wed_irq_get(&wed, 0x20) == 0);
++    assert(aw.regs[MTK_WED_EXT_INT_STATUS / 4] == 0 && exceptions == 1);
++    airoha_wed_irq_mask(&wed, 0x20);
++    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0x20);
++    assert(aw.regs[MTK_WED_EXT_INT_MASK / 4] == EN7581_WED_EXT_ERRORS);
++    assert(!irq_asserted(&aw) && !disables && !errors);
++
++    /* Normal and extended events are both acknowledged; masked bits survive. */
++    aw.regs[MTK_WED_INT_STATUS / 4] = 0x24;
++    aw.regs[MTK_WED_EXT_INT_STATUS / 4] = ext_error;
++    assert(irq_asserted(&aw));
++    airoha_wed_irq_mask(&wed, 0);
++    assert(!irq_asserted(&aw));
++    assert(airoha_wed_irq_get(&wed, 0x20) == 0x20);
++    assert(aw.regs[MTK_WED_INT_STATUS / 4] == 0x04);
++    assert(aw.regs[MTK_WED_EXT_INT_STATUS / 4] == 0 && exceptions == 2);
++    airoha_wed_irq_mask(&wed, 0x20);
++    assert(!irq_asserted(&aw));
++
++    /* A later error is delivered again: this fix does not hide bit 19. */
++    aw.regs[MTK_WED_EXT_INT_STATUS / 4] = ext_error;
++    assert(irq_asserted(&aw));
++    airoha_wed_irq_mask(&wed, 0);
++    assert(!irq_asserted(&aw));
++    assert(airoha_wed_irq_get(&wed, 0x20) == 0 && exceptions == 3);
++    aw.poisoned = true;
++    airoha_wed_irq_mask(&wed, 0xff);
++    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0 && aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
++    puts("PASS: ext=00080000 deasserts during hard IRQ masking, is acknowledged by W1C and is delivered again after unmask");
++}
++int main(void)
++{
++    mask_and_ack_tests();
++    struct device dev; struct airoha_wed aw = {.dev = &dev, .irq = 7};
++    aw.base = (char *)aw.regs;
++    struct mtk_wed_device wed = {.priv = &aw};
++    aw.regs[MTK_WED_INT_STATUS / 4] = 0xa5; aw.regs[MTK_WED_EXT_INT_STATUS / 4] = 0x5a;
++    jiffies = 1000;
++
++    /* A normal rate never trips, and the window resets the counter. */
++    for (int round = 0; round < 5; round++) {
++        for (int i = 0; i < LIMIT; i++) airoha_wed_irq_mask(&wed, 0);
++        assert(!disables && !aw.irq_disabled && !atomic_read(&aw.irq_storm));
++        jiffies += HZ + 1;
++    }
++    /* Non-zero masks are the re-enable path and never count. */
++    for (int i = 0; i < 3 * LIMIT; i++) airoha_wed_irq_mask(&wed, 0x30);
++    assert(!disables && atomic_read(&aw.irq_count) <= LIMIT);
++    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0x30);
++
++    /* One extra interrupt in the same window trips the guard exactly once. */
++    jiffies += HZ + 1;
++    for (int i = 0; i < LIMIT + 1; i++) airoha_wed_irq_mask(&wed, 0);
++    assert(disables == 1 && errors == 1 && aw.irq_disabled && atomic_read(&aw.irq_storm));
++    assert(!aw.poisoned);                       /* DMA ownership state untouched */
++    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0 && aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
++    for (int i = 0; i < 5 * LIMIT; i++) airoha_wed_irq_mask(&wed, 0);
++    assert(disables == 1 && errors == 1);       /* no repeat */
++
++    /* After the trip, re-enable requests are forced to zero. */
++    airoha_wed_irq_mask(&wed, 0xff);
++    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0);
++    assert(aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
++
++    /* quarantine/detach see irq_disabled and do not disable the line twice. */
++    int again = 0; if (!READ_ONCE(aw.irq_disabled)) again++;
++    assert(again == 0);
++    puts("PASS: WED IRQ storm guard trips once at the limit, resets per window, keeps poisoned clear and masks stay zero");
++    return 0;
++}
++'''
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--kernel', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    text = (args.kernel/'drivers/net/ethernet/airoha/airoha_wed.c').read_text()
++    registers = (args.kernel/'drivers/net/ethernet/mediatek/mtk_wed_regs.h').read_text()
++    names = ('MTK_WED_INT_STATUS', 'MTK_WED_INT_MASK',
++             'MTK_WED_EXT_INT_STATUS', 'MTK_WED_EXT_INT_MASK',
++             'MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN')
++    definitions = [re.search(r'^#define ' + re.escape(name) + r'\s+[^\n]+', registers, re.M).group()
++                   for name in names]
++    for name in ('AIROHA_WED_IRQ_STORM_LIMIT', 'EN7581_WED_EXT_ERRORS'):
++        definitions.append(re.search(r'^#define ' + name + r'\s+[^\n]+', text, re.M).group())
++    code = '\n'.join((*definitions, PREFIX,
++                      function(text, 'airoha_wed_irq_storm_check'),
++                      function(text, 'airoha_wed_irq_mask'),
++                      function(text, 'airoha_wed_irq_get', kind='static u32'), TESTS))
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-irq-test-') as temporary:
++        source, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        source.write_text(code)
++        subprocess.run([args.cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                        '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-wed-probe.py b/scripts/tests/test-wed-probe.py
+new file mode 100644
+index 0000000..7cf38ad
+--- /dev/null
++++ b/scripts/tests/test-wed-probe.py
+@@ -0,0 +1,184 @@
++#!/usr/bin/env python3
++"""Compile the shipped PPE/WED probe functions against HG5585F port layouts."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    match = re.search(r'^static int ' + re.escape(name) + r'\(', text, re.M)
++    assert match, name
++    brace = text.index('{', match.start())
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[match.start():end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--kernel', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    driver = args.kernel/'drivers/net/ethernet/airoha'
++    header = (driver/'airoha_eth.h').read_text()
++    gdm_ids = re.search(r'enum airoha_gdm_index \{[\s\S]*?\};', header).group()
++    limits = '\n'.join(re.search(r'^#define ' + name + r'\s+\d+', header, re.M).group()
++                       for name in ('AIROHA_MAX_NUM_GDM_PORTS', 'AIROHA_MAX_NUM_GDM_DEVS'))
++    prefix = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <string.h>
++#include <errno.h>
++typedef uint32_t u32;
++#define ARRAY_SIZE(a) ((int)(sizeof(a) / sizeof((a)[0])))
++#define __releases(lock)
++#define EPROBE_DEFER 517
++#define PCI_VENDOR_ID_MEDIATEK 0x14c3
++#define MTK_WED_BUS_PCIE 1
++#define AIROHA_NPU_WLAN_ABI_HG5585F_2024 1
++#define CONFIG_NET_AIROHA_PPE_HG5585F 1
++#define IS_ENABLED(v) (v)
++#define PTR_ERR(p) ((int)(intptr_t)(p))
++#define ERR_PTR(e) ((void *)(intptr_t)(e))
++#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
++#define upper_32_bits(v) ((uint64_t)(v) >> 32)
++#define MTK_WDMA_GLO_CFG 0
++#define MTK_WDMA_GLO_CFG_TX_DMA_EN 1
++#define MTK_WDMA_GLO_CFG_TX_DMA_BUSY 2
++#define MTK_WED_RESET_WED 1
++#define DL_FLAG_AUTOREMOVE_CONSUMER 2
++#define airoha_wlan_dbg(dev, component, fmt, ...) do { \
++    if (debug_enabled) dev_err(dev, fmt, ##__VA_ARGS__); \
++} while (0)
++struct device_node { int value; };
++struct device { struct device_node *of_node; };
++struct pci_dev { int vendor, device; void *bus; struct device dev; };
++struct device_link { unsigned int flags; };
++struct airoha_gdm_dev { int nbq; };
++'''
++    middle = r'''
++struct airoha_gdm_port { struct airoha_gdm_dev *devs[AIROHA_MAX_NUM_GDM_DEVS]; int id; };
++struct airoha_eth { struct device *dev; struct airoha_gdm_port *ports[AIROHA_MAX_NUM_GDM_PORTS]; };
++struct airoha_ppe_dev { void *priv; struct { int (*prepare_legacy)(struct airoha_ppe_dev *); int (*set_wed)(struct airoha_ppe_dev *,bool); } ops; };
++struct airoha_ppe { struct airoha_eth *eth; bool wed_enabled; };
++struct airoha_npu { unsigned int wlan_abi; struct device *dev; };
++struct mtk_wed_device {
++    struct { int bus_type; struct pci_dev *pci_dev; int (*offload_enable)(struct mtk_wed_device *); void (*offload_disable)(struct mtk_wed_device *); } wlan;
++    void *priv; struct device *dev; int irq,wdma_idx,version; bool airoha;
++};
++struct airoha_wed { struct device *dev; struct mtk_wed_device *wlan; bool poisoned,legacy,tokens_reserved,ppe_configured; struct airoha_ppe_dev *ppe; u32 *wdma; int irq; const char *last_attach_stage; int last_attach_error; u32 last_wdma_cfg; };
++static int flow_offload_mutex,airoha_wed_lock,held,mtu_calls,error_records;
++static char last_error[512];
++static void mutex_lock(int *lock) { (void)lock;held++; }
++static void mutex_unlock(int *lock) { (void)lock;assert(held);held--; }
++static void rcu_read_unlock(void) {}
++static void airoha_ppe_wed_mtu(struct airoha_ppe *ppe) { (void)ppe;mtu_calls++; }
++static void dev_err(struct device *dev,const char *format,...) __attribute__((format(printf,2,3)));
++static void dev_err(struct device *dev,const char *format,...)
++{ (void)dev;va_list ap;va_start(ap,format);vsnprintf(last_error,sizeof(last_error),format,ap);va_end(ap);error_records++; }
++static struct airoha_wed *airoha_wed1;
++static struct device_node node;
++static struct device supplier={.of_node=&node};
++static struct airoha_npu npu={.dev=&supplier};
++static int npu_error,ppe_error,prepare_error,quiesce_error,reset_error,buffer_error,token_error,set_wed_error;
++static int npu_refs,ppe_refs,node_refs,buffers,token_disables,links,managed_deletes;
++static bool link_error,firmware_error,debug_enabled;
++static struct device_link link;
++static struct device_node *of_parse_phandle(struct device_node *np,const char *name,int index)
++{ (void)np;(void)name;(void)index;node_refs++;return &node; }
++static void of_node_put(struct device_node *np) { assert(np==&node);node_refs--; }
++static int pci_domain_nr(void *bus) { (void)bus;return 1; }
++static uint64_t pci_resource_start(struct pci_dev *pci,int index) { (void)pci;(void)index;return 0x24000000; }
++static struct airoha_npu *airoha_npu_get(struct device *dev)
++{ (void)dev;if(npu_error)return ERR_PTR(npu_error);npu_refs++;return &npu; }
++static void airoha_npu_put(struct airoha_npu *p) { assert(p==&npu && npu_refs>0);npu_refs--; }
++static int of_property_read_string_array(struct device_node *np,const char *name,const char **names,int count)
++{ (void)np;(void)name;assert(count==2);names[0]="airoha/en7581_npu_rv32.bin";names[1]="airoha/en7581_npu_data.bin";return firmware_error ? -EINVAL : 2; }
++static int prepare_legacy(struct airoha_ppe_dev *ppe) { (void)ppe;return prepare_error; }
++static int set_wed(struct airoha_ppe_dev *ppe,bool enable) { (void)ppe;assert(enable);return set_wed_error; }
++static struct airoha_ppe_dev ppe_supplier={.ops={.prepare_legacy=prepare_legacy,.set_wed=set_wed}};
++static struct airoha_ppe_dev *airoha_ppe_get_dev(struct device *dev)
++{ (void)dev;if(ppe_error)return ERR_PTR(ppe_error);ppe_refs++;return &ppe_supplier; }
++static void airoha_ppe_put_dev(struct airoha_ppe_dev *ppe) { assert(ppe==&ppe_supplier && ppe_refs>0);ppe_refs--; }
++static struct device_link *device_link_add(struct device *consumer,struct device *provider,unsigned int flags)
++{ (void)consumer;assert(provider==&supplier && flags==DL_FLAG_AUTOREMOVE_CONSUMER);if(link_error)return NULL;link.flags=flags;links++;return &link; }
++static void __attribute__((unused)) device_link_del(struct device_link *p)
++{ assert(p==&link);if(p->flags==DL_FLAG_AUTOREMOVE_CONSUMER)managed_deletes++;else links--; }
++static u32 readl(u32 *address) { return *address; }
++static int airoha_wed_quiesce(struct mtk_wed_device *wed) { (void)wed;return quiesce_error; }
++static int airoha_wed_reset(struct mtk_wed_device *wed,int mask) { (void)wed;(void)mask;return reset_error; }
++static int airoha_wed_buffers_alloc(struct mtk_wed_device *wed) { (void)wed;buffers++;return buffer_error; }
++static void airoha_wed_buffers_free(struct mtk_wed_device *wed) { (void)wed;buffers=0; }
++static int offload_enable(struct mtk_wed_device *wed) { (void)wed;return token_error; }
++static void offload_disable(struct mtk_wed_device *wed) { (void)wed;token_disables++; }
++'''
++    tests = r'''
++static void port_tests(void)
++{
++    struct airoha_eth eth={0};struct airoha_ppe ppe={.eth=&eth};struct airoha_ppe_dev dev={.priv=&ppe};
++    struct airoha_gdm_port ports[AIROHA_MAX_NUM_GDM_PORTS]={0};struct airoha_gdm_dev netdev={.nbq=0};
++    /* HG5585F: Ethernet GDM1, PON GDM2, no GDM3 netdev, LAN1 on GDM4. */
++    for(int i=0;i<AIROHA_MAX_NUM_GDM_PORTS;i++){ports[i].id=i+1;eth.ports[i]=&ports[i];if(i!=AIROHA_GDM3_IDX-1)ports[i].devs[0]=&netdev;}
++    eth.ports[AIROHA_GDM3_IDX-1]=NULL;
++    assert(airoha_ppe_set_wed(&dev,true)==0 && ppe.wed_enabled && mtu_calls==1 && held==0);
++    eth.ports[AIROHA_GDM3_IDX-1]=&ports[AIROHA_GDM3_IDX-1];
++    assert(airoha_ppe_set_wed(&dev,true)==0 && mtu_calls==2 && held==0);
++    for(int i=0;i<AIROHA_MAX_NUM_GDM_DEVS;i++){
++        int before=mtu_calls;ppe.wed_enabled=false;ports[AIROHA_GDM3_IDX-1].devs[i]=&netdev;netdev.nbq=i+4;
++        assert(airoha_ppe_set_wed(&dev,true)==-EBUSY && !ppe.wed_enabled && mtu_calls==before && held==0);
++        assert(airoha_ppe_set_wed(&dev,false)==0 && !ppe.wed_enabled && mtu_calls==before+1 && held==0);
++        ports[AIROHA_GDM3_IDX-1].devs[i]=NULL;
++    }
++    puts("PASS: HG5585F LAN1/GDM4 and PON coexist with WED; every occupied GDM3 slot still rejects enable");
++}
++static void attach_tests(void)
++{
++    const char *stages[]={"provider","ownership","npu_supplier","firmware_abi","ppe_supplier","ppe_prepare","device_link","wdma_busy","quiesce","reset","buffers","tokens","ppe_enable","ppe_enable"};
++    for(int scenario=0;scenario<14;scenario++){
++        struct pci_dev pci={.vendor=PCI_VENDOR_ID_MEDIATEK,.device=0x7906};u32 wdma=0;
++        struct airoha_wed aw={.dev=&supplier,.irq=42,.wdma=&wdma};
++        struct mtk_wed_device wed={.wlan={.bus_type=MTK_WED_BUS_PCIE,.pci_dev=&pci,.offload_enable=offload_enable,.offload_disable=offload_disable}};
++        npu_error=ppe_error=prepare_error=quiesce_error=reset_error=buffer_error=token_error=set_wed_error=0;
++        npu_refs=ppe_refs=node_refs=buffers=token_disables=links=managed_deletes=error_records=0;
++        link_error=firmware_error=false;npu.wlan_abi=0;airoha_wed1=&aw;
++        switch(scenario){case 0:airoha_wed1=NULL;break;case 1:aw.poisoned=true;break;case 2:npu_error=-EPROBE_DEFER;break;case 3:firmware_error=true;break;case 4:ppe_error=-EPROBE_DEFER;break;case 5:npu.wlan_abi=AIROHA_NPU_WLAN_ABI_HG5585F_2024;prepare_error=-EBUSY;break;case 6:link_error=true;break;case 7:wdma=MTK_WDMA_GLO_CFG_TX_DMA_EN;break;case 8:quiesce_error=-ETIMEDOUT;break;case 9:reset_error=-ETIMEDOUT;break;case 10:buffer_error=-ENOMEM;break;case 11:token_error=1;break;case 12:set_wed_error=-EBUSY;break;default:break;}
++        int result=airoha_wed_attach(&wed);
++        assert(held==0 && npu_refs==0 && node_refs==0 && managed_deletes==0);
++        if(scenario<13){
++            assert(result<0 && error_records==1 && strstr(last_error,stages[scenario]));
++            assert(aw.wlan==NULL && !aw.ppe_configured && !aw.tokens_reserved && buffers==0 && ppe_refs==0);
++            assert(!wed.priv && !wed.airoha);
++            if(scenario!=0){assert(aw.last_attach_error==result && !strcmp(aw.last_attach_stage,stages[scenario]));}
++            /* Driver core performs AUTOREMOVE_CONSUMER cleanup on failed probe. */
++            links=0;
++        }else{
++            assert(result==0 && aw.wlan==&wed && aw.ppe_configured && aw.tokens_reserved && wed.airoha);
++            assert(ppe_refs==1 && buffers==1 && links==1 && aw.last_attach_error==0);
++            ppe_refs=buffers=links=0;
++        }
++    }
++    puts("PASS: WED attach failures retain no PPE/tokens/buffers, preserve managed link ownership and report stages with debug off");
++}
++int main(void){port_tests();attach_tests();return 0;}
++'''
++    code='\n'.join((prefix,gdm_ids,limits,middle,
++                    function((driver/'airoha_ppe.c').read_text(),'airoha_ppe_set_wed'),
++                    function((driver/'airoha_wed.c').read_text(),'airoha_wed_attach'),tests))
++    with tempfile.TemporaryDirectory(prefix='hg5585f-wed-probe-test-') as temporary:
++        source,binary=Path(temporary)/'test.c',Path(temporary)/'test'
++        source.write_text(code)
++        subprocess.run([args.cc,'-std=gnu11','-Wall','-Wextra','-Werror','-Wformat=2',
++                        '-fsanitize=address,undefined',str(source),'-o',str(binary)],check=True)
++        subprocess.run([str(binary)],check=True)
++
++
++if __name__=='__main__':
++    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+new file mode 100644
+index 0000000..fd81f29
+--- /dev/null
++++ b/scripts/tests/test-workflow-paths.py
+@@ -0,0 +1,268 @@
++#!/usr/bin/env python3
++"""Run the workflow's source-validation commands against OpenWrt layouts."""
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++import textwrap
++import unittest
++
++
++RECIPE = Path(__file__).resolve().parents[2]
++WORKFLOW = RECIPE/'.github/workflows/hg5585f-ct-builder.yml'
++
++
++def source_validation():
++    text = (RECIPE/'scripts/validate-build.sh').read_text()
++    return text.split('\nfor profile in native wed npu;', 1)[0]
++
++
++def full_validation():
++    return (RECIPE/'scripts/validate-build.sh').read_text()
++
++
++def workflow_step(name):
++    text = WORKFLOW.read_text()
++    start = text.index('      - name: ' + name + '\n')
++    end = text.find('\n      - name: ', start + 1)
++    return text[start:end if end >= 0 else len(text)]
++
++
++class WorkflowUploads(unittest.TestCase):
++    def test_firmware_upload_follows_build_and_precedes_checks(self):
++        names = re.findall(r'^      - name: (.+)$', WORKFLOW.read_text(), re.M)
++        build = names.index('Build native, WED and NPU firmware')
++        self.assertEqual(names[build + 1], 'Upload built firmware')
++        self.assertEqual(names[build + 2], 'Validate actual kernel, ROM ABI and image profiles')
++        upload = workflow_step('Upload built firmware')
++        self.assertIn('uses: actions/upload-artifact@v4', upload)
++        self.assertIn("steps.firmware.outcome == 'success'", upload)
++        self.assertNotIn('steps.validation', upload)
++        report = workflow_step('Upload validation report')
++        self.assertIn("steps.validation.outcome == 'failure'", report)
++        self.assertNotIn('continue-on-error', workflow_step(
++            'Validate actual kernel, ROM ABI and image profiles'))
++
++    def test_validation_failure_preserves_log_and_exit_status(self):
++        step = workflow_step('Validate actual kernel, ROM ABI and image profiles')
++        command = textwrap.dedent(step.split('        run: |\n', 1)[1])
++        with tempfile.TemporaryDirectory(prefix='hg5585f-validation-log-') as temporary:
++            root = Path(temporary)
++            script = root/'scripts/validate-build.sh'
++            script.parent.mkdir()
++            script.write_text('echo "test validation output"\necho "test validation error" >&2\nexit 7\n')
++            env = dict(os.environ, GITHUB_WORKSPACE=str(root))
++            result = subprocess.run(['bash', '-euo', 'pipefail', '-c', command],
++                                    cwd=root, env=env, capture_output=True, text=True)
++            self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
++            self.assertEqual((root/'hg5585f-validation.log').read_text(),
++                             'test validation output\ntest validation error\n')
++
++    def test_firmware_artifact_includes_itb_and_bin_profiles(self):
++        step = workflow_step('Upload built firmware')
++        text = step.split('          path: |\n', 1)[1].split('          if-no-files-found:', 1)[0]
++        patterns = textwrap.dedent(text).splitlines()
++        with tempfile.TemporaryDirectory(prefix='hg5585f-upload-layout-') as temporary:
++            root = Path(temporary)
++            output = root/'openwrt/bin/targets/airoha/an7581'
++            output.mkdir(parents=True)
++            expected = set()
++            for profile in ('ct', 'ct-wed', 'ct-npu'):
++                for suffix in ('initramfs-recovery.itb', 'squashfs-sysupgrade.itb',
++                               'squashfs-sysupgrade.bin'):
++                    path = output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-{suffix}'
++                    path.touch()
++                    expected.add(path)
++            unrelated = output/'ponwrt-airoha-an7581-other-device-sysupgrade.itb'
++            unrelated.touch()
++            uploaded = {path for pattern in patterns for path in root.glob(pattern)}
++            self.assertEqual(uploaded, expected)
++
++
++class WorkflowPaths(unittest.TestCase):
++    def setUp(self):
++        temporary = tempfile.TemporaryDirectory(prefix='hg5585f-workflow-paths-')
++        self.addCleanup(temporary.cleanup)
++        self.root = Path(temporary.name)
++        self.kernel = Path('build_dir/target-aarch64_cortex-a53_musl/'
++                           'linux-airoha_an7581/linux-6.18.60')
++        self.mt76 = self.kernel.parent/'mt76-2026.10.28~0936617d'
++        self.calls = self.root/'calls.jsonl'
++        self.write(self.kernel/'.config', 'CONFIG_NET_AIROHA_WED=y\n')
++        # Stub checker internals; the real workflow selects and passes paths.
++        stub = '''import json,os,sys
++from pathlib import Path
++with Path(os.environ['CHECK_LOG']).open('a') as log:
++    log.write(json.dumps(sys.argv) + '\\n')
++'''
++        for name in ('check-hg5585f-ppe-accounting.py', 'check-hg5585f-rom-abi.py',
++                     'check-hg5585f-wifi-diagnostics.py', 'check-hg5585f-wed-pci-irq.py',
++                     'check-hg5585f-wed-rx-irq.py',
++                     'check-hg5585f-npu-input-ring.py',
++                     'check-hg5585f-images.py'):
++            self.write(Path('scripts')/name, stub)
++        self.write(Path('recipe/scripts/prepare.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-wed-irq-storm.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-npu-lifecycle.py'), stub)
++        self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
++        self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)
++        self.write(Path('scripts/validate-build.sh'), full_validation())
++
++    def write(self, path, contents=''):
++        target = self.root/path
++        target.parent.mkdir(parents=True, exist_ok=True)
++        target.write_text(contents)
++
++    def tree(self, path, backend=True):
++        self.write(path/'mt7915/pci.c')
++        if backend:
++            self.write(path/'npu_rx_legacy.c')
++
++    def validate(self):
++        env = dict(os.environ, GITHUB_WORKSPACE=str(self.root/'recipe'),
++                   CHECK_LOG=str(self.calls))
++        return subprocess.run(['bash', '-euo', 'pipefail', '-c', source_validation()],
++                              cwd=self.root, env=env, text=True, capture_output=True)
++
++    def validate_full(self):
++        env = dict(os.environ, GITHUB_WORKSPACE=str(self.root/'recipe'),
++                   CHECK_LOG=str(self.calls))
++        return subprocess.run(['bash', 'scripts/validate-build.sh'], cwd=self.root,
++                              env=env, text=True, capture_output=True)
++
++    def image_set(self, recovery=True, sysupgrade=True):
++        output = self.root/'bin/targets/airoha/an7581'
++        output.mkdir(parents=True, exist_ok=True)
++        for profile in ('ct', 'ct-wed', 'ct-npu'):
++            if recovery:
++                (output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-initramfs-recovery.itb').touch()
++            if sysupgrade:
++                (output/f'ponwrt-airoha-an7581-fiberhome_hg5585f-{profile}-squashfs-sysupgrade.itb').touch()
++
++    def checked_backends(self):
++        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
++        return [args[args.index('--backend') + 1] for args in calls
++                if '--backend' in args]
++
++    def test_full_validation_requires_recovery_and_sysupgrade_per_profile(self):
++        self.tree(self.mt76)
++        self.image_set(recovery=True, sysupgrade=False)
++        result = self.validate_full()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('Missing recovery/sysupgrade image pair for native', result.stdout)
++
++    def test_full_validation_runs_all_profiles_after_image_pairs_exist(self):
++        self.tree(self.mt76)
++        self.image_set()
++        result = self.validate_full()
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
++        image_calls = [args for args in calls if 'check-hg5585f-images.py' in args[0]]
++        self.assertEqual(len(image_calls), 6)
++        self.assertEqual(sum('--wed' in args for args in image_calls), 2)
++        self.assertEqual(sum('--npu' in args for args in image_calls), 2)
++        self.assertEqual(sum('--wed' not in args and '--npu' not in args for args in image_calls), 2)
++
++    def test_mt76_kernel_package_layout(self):
++        self.tree(self.mt76)
++        # A source-like stale directory at the old path must not be selected.
++        self.tree(Path('build_dir/target-aarch64_cortex-a53_musl/mt76-stale'))
++        result = self.validate()
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
++        self.assertIn(str(self.mt76), result.stdout)
++        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
++        irq_calls = [args for args in calls if 'check-hg5585f-wed-pci-irq.py' in args[0]]
++        self.assertEqual(irq_calls, [['scripts/check-hg5585f-wed-pci-irq.py',
++                                     '--mt76', str(self.mt76), '--kernel', str(self.kernel)]])
++        rx_calls = [args for args in calls if 'check-hg5585f-wed-rx-irq.py' in args[0]]
++        self.assertEqual(rx_calls, [['scripts/check-hg5585f-wed-rx-irq.py', '--mt76', str(self.mt76)]])
++        input_calls = [args for args in calls if 'check-hg5585f-npu-input-ring.py' in args[0]]
++        self.assertEqual(input_calls, [['scripts/check-hg5585f-npu-input-ring.py',
++            '--header', str(self.kernel/'include/linux/soc/airoha/airoha_wlan_legacy.h'),
++            '--mt76', str(self.mt76), '--firmware', 'files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin']])
++
++    def test_other_mt76_version_and_unrelated_directory(self):
++        other = self.kernel.parent/'mt76-2026-11-16-abcdef12'
++        self.tree(other)
++        self.write(self.kernel.parent/'mt76-tools/Makefile')
++        result = self.validate()
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertEqual(self.checked_backends(), [str(other/'npu_rx_legacy.c')])
++
++    def test_initramfs_manifest_and_other_files_are_not_kernels(self):
++        self.tree(self.mt76)
++        # Kernel/SetInitramfs writes this beside LINUX_DIR, not inside it.
++        self.write(Path(str(self.kernel) + '.init-cpio-list'), 'file /init init 0755 0 0\n')
++        self.write(Path(str(self.kernel) + '.tar.xz'))
++        self.write(Path(str(self.kernel) + '.debug'))
++        self.write(self.kernel.parent/'linux-firmware-20261019/Makefile')
++        result = self.validate()
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
++        self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
++
++    def test_initramfs_directory_with_config_is_not_a_kernel(self):
++        self.tree(self.mt76)
++        self.write(self.kernel.parent/'linux-6.18.60.init-cpio-list/.config')
++        result = self.validate()
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
++        self.assertEqual(result.stdout.count('Checking built kernel source:'), 1)
++
++    def test_unrelated_config_is_not_a_kernel(self):
++        self.tree(self.mt76)
++        self.write(self.kernel.parent/'linux-firmware-20261019/.config')
++        result = self.validate()
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertEqual(self.checked_backends(), [str(self.mt76/'npu_rx_legacy.c')])
++
++    def test_multiple_configured_kernels_fail_before_any_source_check(self):
++        other = self.kernel.parent/'linux-6.18.61/.config'
++        self.write(other)
++        result = self.validate()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('Expected one configured AN7581 kernel; found 2', result.stdout)
++        self.assertIn(str(self.kernel/'.config'), result.stdout)
++        self.assertIn(str(other), result.stdout)
++        self.assertFalse(self.calls.exists())
++
++    def test_missing_backend_fails_with_actual_path(self):
++        self.tree(self.mt76, backend=False)
++        result = self.validate()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('MT76 NPU RX source missing: ' + str(self.mt76/'npu_rx_legacy.c'),
++                      result.stdout)
++        self.assertEqual(self.checked_backends(), [])
++
++    def test_missing_build_directory_cannot_skip_checks(self):
++        # Even if an old path exists, a missing kernel package is an error.
++        self.tree(Path('build_dir/target-aarch64_cortex-a53_musl/mt76-stale'))
++        result = self.validate()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('MT76 build directory missing under: ' + str(self.kernel.parent),
++                      result.stdout)
++        self.assertEqual(self.checked_backends(), [])
++
++    def test_missing_kernel_cannot_skip_checks(self):
++        (self.root/self.kernel/'.config').unlink()
++        result = self.validate()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('Expected one configured AN7581 kernel; found 0', result.stdout)
++        self.assertFalse(self.calls.exists())
++
++    def test_absent_build_tree_cannot_skip_checks(self):
++        (self.root/self.kernel/'.config').unlink()
++        (self.root/self.kernel).rmdir()
++        (self.root/self.kernel.parent).rmdir()
++        result = self.validate()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('Expected one configured AN7581 kernel; found 0', result.stdout)
++        self.assertFalse(self.calls.exists())
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+new file mode 100644
+index 0000000..73fe057
+--- /dev/null
++++ b/scripts/validate-build.sh
+@@ -0,0 +1,80 @@
++#!/bin/bash
++# Run after firmware upload; a failed check must still fail the job.
++set -euo pipefail
++
++export PATH="$PWD/staging_dir/host/bin:$PATH"
++shopt -s nullglob
++kernel_configs=()
++while IFS= read -r -d '' kernel_config; do
++  kernel_dir=${kernel_config%/.config}
++  kernel_name=${kernel_dir##*/}
++  [[ "$kernel_name" =~ ^linux-[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || continue
++  kernel_configs+=("$kernel_config")
++done < <(find -L build_dir/target-* -type f -path '*/linux-airoha_an7581/linux-*/.config' -print0 2>/dev/null)
++[ "${#kernel_configs[@]}" -eq 1 ] || {
++  echo "Expected one configured AN7581 kernel; found ${#kernel_configs[@]}"
++  if [ "${#kernel_configs[@]}" -gt 0 ]; then
++    printf 'Kernel candidate: %s\n' "${kernel_configs[@]}"
++  else
++    find -L build_dir/target-* -type f -path '*/linux-airoha_an7581/linux-*/.config' -print 2>/dev/null || true
++  fi
++  exit 1
++}
++for kernel_config in "${kernel_configs[@]}"; do
++  [ -f "$kernel_config" ] || { echo "Kernel config missing: $kernel_config"; exit 1; }
++  kernel=${kernel_config%/.config}
++  echo "Checking built kernel source: $kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-irq-storm.py" --kernel "$kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/test-npu-lifecycle.py" --kernel "$kernel"
++  python3 "$GITHUB_WORKSPACE/scripts/tests/check-hg5585f-ppe-host-start.py" --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe.c"
++  python3 scripts/check-hg5585f-ppe-accounting.py --source "$kernel/drivers/net/ethernet/airoha/airoha_ppe_account.c"
++  mt76_found=0
++  for mt76 in "${kernel%/*}"/mt76-*; do
++    [ -d "$mt76" ] || continue
++    [ -f "$mt76/mt7915/pci.c" ] || continue
++    [ -f "$mt76/npu_rx_legacy.c" ] || {
++      echo "MT76 NPU RX source missing: $mt76/npu_rx_legacy.c"; exit 1;
++    }
++    echo "Checking built MT76 source: $mt76"
++    python3 scripts/check-hg5585f-rom-abi.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --backend "$mt76/npu_rx_legacy.c"
++    python3 scripts/check-hg5585f-wifi-diagnostics.py --mt76 "$mt76" --kernel "$kernel"
++    python3 scripts/check-hg5585f-wed-pci-irq.py --mt76 "$mt76" --kernel "$kernel"
++    python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
++    python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
++    python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
++    mt76_found=$((mt76_found + 1))
++  done
++  [ "$mt76_found" -gt 0 ] || {
++    echo "MT76 build directory missing under: ${kernel%/*}"
++    find "${kernel%/*}" -maxdepth 2 -type d -name 'mt76*' -print
++    exit 1
++  }
++done
++for profile in native wed npu; do
++  case "$profile" in
++    native) pattern='*fiberhome_hg5585f-ct-*'; flag= ;;
++    wed) pattern='*fiberhome_hg5585f-ct-wed-*'; flag=--wed ;;
++    npu) pattern='*fiberhome_hg5585f-ct-npu-*'; flag=--npu ;;
++  esac
++  recovery_count=0
++  sysupgrade_count=0
++  while IFS= read -r image; do
++    case "$profile:$image" in native:*-ct-wed-*|native:*-ct-npu-*) continue ;; esac
++    case "$image" in
++      *initramfs-recovery.itb) recovery_count=$((recovery_count + 1)) ;;
++      *sysupgrade.itb) sysupgrade_count=$((sysupgrade_count + 1)) ;;
++      *) echo "Unexpected $profile image name: $image"; exit 1 ;;
++    esac
++    if [ -n "$flag" ]; then
++      python3 scripts/check-hg5585f-images.py "$flag" "$image"
++    else
++      python3 scripts/check-hg5585f-images.py "$image"
++    fi
++  done < <(find bin/targets/airoha/an7581 -maxdepth 1 -name "$pattern.itb" -type f)
++  [ "$recovery_count" -ge 1 ] && [ "$sysupgrade_count" -ge 1 ] || {
++    echo "Missing recovery/sysupgrade image pair for $profile (recovery=$recovery_count sysupgrade=$sysupgrade_count)"
++    exit 1
++  }
++done
 diff --git a/target/linux/airoha/an7581/config-6.18 b/target/linux/airoha/an7581/config-6.18
 index 762ddaf..eb63057 100644
 --- a/target/linux/airoha/an7581/config-6.18
@@ -10860,3 +13396,972 @@ index 0000000..70a67a9
 + 	debugfs_create_file("config", 0444, ppe->debugfs_dir, ppe,
 + 			    &airoha_ppe_debugfs_config_fops);
 + 	debugfs_create_file("bind_rate", 0644, ppe->debugfs_dir, ppe,
+diff --git a/target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch b/target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch
+new file mode 100644
+index 0000000..8197f4f
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch
+@@ -0,0 +1,285 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: add optional wireless lifecycle diagnostics
++
++Keep verbose diagnostics off by default and report failures with stage and errno.
++
++diff --git a/drivers/net/ethernet/airoha/airoha_npu.c b/drivers/net/ethernet/airoha/airoha_npu.c
++index 55694d2..f0d8395 100644
++--- a/drivers/net/ethernet/airoha/airoha_npu.c
+++++ b/drivers/net/ethernet/airoha/airoha_npu.c
++@@ -13,10 +13,22 @@
++ #include <linux/of_reserved_mem.h>
++ #include <linux/regmap.h>
++ #include <linux/reset.h>
+++#include <linux/moduleparam.h>
+++#include <linux/unaligned.h>
++ 
++ #include "airoha_eth.h"
++ #include <linux/soc/airoha/airoha_wlan_legacy.h>
++ 
+++static bool wlan_debug;
+++module_param(wlan_debug, bool, 0644);
+++MODULE_PARM_DESC(wlan_debug, "HG5585F wireless lifecycle diagnostics (default off)");
+++
+++bool airoha_wlan_debug_enabled(void)
+++{
+++	return READ_ONCE(wlan_debug);
+++}
+++EXPORT_SYMBOL_GPL(airoha_wlan_debug_enabled);
+++
++ #define NPU_EN7581_FIRMWARE_DATA		"airoha/en7581_npu_data.bin"
++ #define NPU_EN7581_FIRMWARE_RV32		"airoha/en7581_npu_rv32.bin"
++ #define NPU_EN7581_7996_FIRMWARE_DATA		"airoha/en7581_MT7996_npu_data.bin"
++@@ -340,6 +352,8 @@ static int airoha_npu_legacy_stop(struct airoha_npu *npu)
++ 	if (!err)
++ 		err = drain_err ? drain_err : dma_err;
++ 	legacy->state = err ? LEGACY_FAULT : LEGACY_STOPPED;
+++	airoha_wlan_dbg(npu->dev, "npu", "event=stop state=%u error=%d",
+++			 (unsigned int)legacy->state, err);
++ 
++ 	return err;
++ }
++@@ -420,7 +434,7 @@ static void airoha_npu_legacy_cleanup(void *data)
++ 	if (err) {
++ 		/* Keep the mappings and DMA device alive if hardware stop failed. */
++ 		get_device(npu->dev);
++-		dev_err(npu->dev, "legacy NPU stop failed: %d; mailbox DMA retained\n", err);
+++		dev_err(npu->dev, "hg5585f-wifi: component=npu event=stop_failed error=%d mailbox_dma=retained\n", err);
++ 		return;
++ 	}
++ 	mutex_lock(&legacy->lock);
++@@ -545,6 +559,7 @@ static int __airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
++ {
++ 	struct airoha_npu_core *core = &npu->cores[0]; /* FIXME: core */
++ 	unsigned int capacity;
+++	u32 header = 0, command = 0;
++ 	u32 val, offset = 0;
++ 	int ret;
++ 
++@@ -561,6 +576,10 @@ static int __airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
++ 
++ 	if (reply && (reply_offset > len || reply_len > len - reply_offset))
++ 		return -EINVAL;
+++	if (func_id == NPU_FUNC_WIFI && len >= 8) {
+++		header = get_unaligned_le32(data);
+++		command = get_unaligned_le32((const u8 *)data + 4);
+++	}
++ 
++ 	/*
++ 	 * Mailbox payloads are bidirectional (CPU request, NPU response).
++@@ -608,8 +627,12 @@ static int __airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
++ 	}
++ 
++ 	spin_unlock_bh(&core->lock);
+++	if (ret && npu->wlan_abi == AIROHA_NPU_WLAN_ABI_HG5585F_2024)
+++		dev_err_ratelimited(npu->dev,
+++			"hg5585f-wifi: component=npu event=mailbox_failed family=%d band=%u op=%u command=%u control=0x%08x error=%d\n",
+++			func_id, header & 15, (header >> 4) & 15, command, val, ret);
++ 
++-	if (ret == -ETIMEDOUT)
+++	if (ret == -ETIMEDOUT && npu->wlan_abi == AIROHA_NPU_WLAN_ABI_UPSTREAM)
++ 		dev_err_ratelimited(npu->dev,
++ 				    "mailbox function %d timed out\n",
++ 				    func_id);
++@@ -1268,7 +1291,7 @@ static int airoha_npu_wlan_select_abi(struct airoha_npu *npu)
++ 		return dev_err_probe(dev, -EINVAL, "HG5585F firmware pair mismatch\n");
++ 
++ 	npu->wlan_abi = AIROHA_NPU_WLAN_ABI_HG5585F_2024;
++-	dev_info(dev, "HG5585F WLAN ABI; upstream PPE disabled\n");
+++	dev_info(dev, "hg5585f-wifi: component=npu event=abi_selected abi=hg5585f-2024 firmware_ppe=disabled\n");
++ 	return 0;
++ }
++ 
++@@ -1319,6 +1342,8 @@ static int airoha_npu_boot(struct airoha_npu *npu, void __iomem *base,
++ 		npu->cores[0].legacy_timeout = false;
++ 		WRITE_ONCE(legacy->blocked, false);
++ 		spin_unlock_bh(&npu->cores[0].lock);
+++		airoha_wlan_dbg(npu->dev, "npu", "event=boot_ready abi=%u",
+++				 (unsigned int)npu->wlan_abi);
++ 	}
++ 
++ 	return 0;
++@@ -1372,7 +1397,7 @@ static int airoha_npu_probe(struct platform_device *pdev)
++ 		return err;
++ 	err = airoha_npu_legacy_init(pdev, npu, base, &res);
++ 	if (err)
++-		return dev_err_probe(dev, err, "legacy NPU lifecycle resources unavailable\n");
+++		return dev_err_probe(dev, err, "hg5585f-wifi: component=npu event=probe_failed stage=lifecycle_resources\n");
++ 
++ 	irq = platform_get_irq(pdev, 0);
++ 	if (irq < 0)
++diff --git a/drivers/net/ethernet/airoha/airoha_wed.c b/drivers/net/ethernet/airoha/airoha_wed.c
++index 8dffee3..fc74178 100644
++--- a/drivers/net/ethernet/airoha/airoha_wed.c
+++++ b/drivers/net/ethernet/airoha/airoha_wed.c
++@@ -239,7 +239,7 @@ static u32 airoha_wed_irq_get(struct mtk_wed_device *wed, u32 mask)
++ 		airoha_wed_write(wed, MTK_WED_INT_STATUS, status);
++ 	if (errors) {
++ 		airoha_wed_write(wed, MTK_WED_EXT_INT_STATUS, errors);
++-		dev_warn_ratelimited(wed->dev, "WED exception %08x\n", errors);
+++		dev_warn_ratelimited(wed->dev, "hg5585f-wifi: component=wed event=exception status=0x%08x\n", errors);
++ 	}
++ 
++ 	return status;
++@@ -286,7 +286,7 @@ static int airoha_wed_quiesce(struct mtk_wed_device *wed)
++ 	wed->running = false;
++ 	if (err) {
++ 		aw->poisoned = true;
++-		dev_err(aw->dev, "WED reset did not complete; DMA memory retained\n");
+++		dev_err(aw->dev, "hg5585f-wifi: component=wed event=reset_failed dma_memory=retained\n");
++ 	}
++ 
++ 	return err;
++@@ -447,7 +447,7 @@ static void airoha_wed_start(struct mtk_wed_device *wed, u32 mask)
++ 	if (aw->poisoned || !wed->txfree_ring.wpdma || !wed->tx_ring[0].desc)
++ 		return;
++ 	if (!wed->init_done && airoha_wed_hw_init(wed)) {
++-		dev_err(aw->dev, "WED buffer manager reset did not complete\n");
+++		dev_err(aw->dev, "hg5585f-wifi: component=wed event=buffer_manager_reset_failed\n");
++ 		aw->poisoned = true;
++ 		return;
++ 	}
++@@ -470,6 +470,7 @@ static void airoha_wed_start(struct mtk_wed_device *wed, u32 mask)
++ 	writel(cfg, aw->wdma + MTK_WDMA_GLO_CFG);
++ 	wed->running = true;
++ 	airoha_wed_irq_mask(wed, mask);
+++	airoha_wlan_dbg(aw->dev, "wed", "event=tx_started irq_mask=0x%08x", mask);
++ }
++ 
++ static void airoha_wed_reset_dma(struct mtk_wed_device *wed)
++@@ -547,6 +548,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 	struct airoha_wed *aw;
++ 	struct airoha_npu *npu;
++ 	const char *firmware[2];
+++	const char *stage = "provider";
++ 	bool legacy;
++ 	struct device_link *link = NULL;
++ 	int err = -ENODEV;
++@@ -563,17 +565,21 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 	if (!aw || aw->dev->of_node != np)
++ 		goto out;
++ 	if (aw->wlan || aw->poisoned) {
+++		stage = "ownership";
++ 		err = -EBUSY;
++ 		goto out;
++ 	}
+++	stage = "pcie";
++ 	if (pci_domain_nr(pci->bus) != 1 ||
++ 	    upper_32_bits(pci_resource_start(pci, 0)))
++ 		goto out;
+++	stage = "npu_supplier";
++ 	npu = airoha_npu_get(&pci->dev);
++ 	if (IS_ERR(npu)) {
++ 		err = PTR_ERR(npu);
++ 		goto out;
++ 	}
+++	stage = "firmware_abi";
++ 	legacy = npu->wlan_abi == AIROHA_NPU_WLAN_ABI_HG5585F_2024;
++ 	if (legacy) {
++ 		/* Firmware names were checked by the supplier. PPE must be host-managed. */
++@@ -589,6 +595,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 	airoha_npu_put(npu);
++ 	if (err)
++ 		goto out;
+++	stage = "ppe_supplier";
++ 	aw->ppe = airoha_ppe_get_dev(&pci->dev);
++ 	if (IS_ERR(aw->ppe)) {
++ 		err = PTR_ERR(aw->ppe);
++@@ -596,6 +603,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 		goto out;
++ 	}
++ 	if (legacy) {
+++		stage = "ppe_prepare";
++ 		err = aw->ppe->ops.prepare_legacy(aw->ppe);
++ 		if (err) {
++ 			airoha_ppe_put_dev(aw->ppe);
++@@ -603,6 +611,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 			goto out;
++ 		}
++ 	}
+++	stage = "device_link";
++ 	link = device_link_add(&pci->dev, aw->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
++ 	if (!link) {
++ 		airoha_ppe_put_dev(aw->ppe);
++@@ -610,6 +619,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 		err = -ENOMEM;
++ 		goto out;
++ 	}
+++	stage = "wdma_busy";
++ 	if (readl(aw->wdma + MTK_WDMA_GLO_CFG) &
++ 	    (MTK_WDMA_GLO_CFG_TX_DMA_EN | MTK_WDMA_GLO_CFG_TX_DMA_BUSY)) {
++ 		device_link_del(link);
++@@ -624,28 +634,34 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 	wed->wdma_idx = 1;
++ 	wed->version = 1;
++ 	wed->airoha = true;
+++	stage = "quiesce";
++ 	err = airoha_wed_quiesce(wed);
++ 	if (err)
++ 		goto error;
+++	stage = "reset";
++ 	err = airoha_wed_reset(wed, MTK_WED_RESET_WED);
++ 	if (err)
++ 		goto error;
+++	stage = "buffers";
++ 	err = airoha_wed_buffers_alloc(wed);
++ 	if (err)
++ 		goto error;
++ 	aw->tokens_reserved = true;
+++	stage = "tokens";
++ 	err = wed->wlan.offload_enable(wed);
++ 	if (err) {
++ 		err = -ETIMEDOUT;
++ 		goto error;
++ 	}
+++	stage = "ppe_enable";
++ 	err = aw->ppe->ops.set_wed(aw->ppe, true);
++ 	if (err)
++ 		goto error;
++ 	aw->ppe_configured = true;
++ 	aw->wlan = wed;
++ 	aw->legacy = legacy;
++-	dev_info(aw->dev, "MT7916 WED transmit queues attached\n");
+++	airoha_wlan_dbg(aw->dev, "wed", "event=attached rx=%s irq=%d",
+++			 legacy ? "npu" : "native", aw->irq);
++ 	goto out;
++ error:
++ 	device_link_del(link);
++@@ -659,6 +675,9 @@ error:
++ 	wed->priv = NULL;
++ 	wed->airoha = false;
++ out:
+++	if (err)
+++		airoha_wlan_dbg(&pci->dev, "wed", "event=attach_failed stage=%s error=%d",
+++				 stage, err);
++ 	mutex_unlock(&airoha_wed_lock);
++ 	of_node_put(np);
++ 	return err;
++diff --git a/include/linux/soc/airoha/airoha_offload.h b/include/linux/soc/airoha/airoha_offload.h
++index 9d399bd..99f5f72 100644
++--- a/include/linux/soc/airoha/airoha_offload.h
+++++ b/include/linux/soc/airoha/airoha_offload.h
++@@ -9,6 +9,23 @@
++ #include <linux/skbuff.h>
++ #include <linux/spinlock.h>
++ #include <linux/workqueue.h>
+++#include <linux/device.h>
+++
+++#if IS_REACHABLE(CONFIG_NET_AIROHA_NPU)
+++bool airoha_wlan_debug_enabled(void);
+++#else
+++static inline bool airoha_wlan_debug_enabled(void)
+++{
+++	return false;
+++}
+++#endif
+++
+++/* One record per line; arguments are evaluated only while logging is enabled. */
+++#define airoha_wlan_dbg(dev, component, fmt, ...) do { \
+++	if (unlikely(airoha_wlan_debug_enabled())) \
+++		dev_info_ratelimited(dev, "hg5585f-wifi: component=" component " " \
+++				     fmt "\n", ##__VA_ARGS__); \
+++} while (0)
++ 
++ enum {
++ 	PPE_CPU_REASON_HIT_UNBIND_RATE_REACHED = 0x0f,
+diff --git a/target/linux/airoha/patches-6.18/939-net-airoha-fix-wed-gdm-port-and-probe-cleanup.patch b/target/linux/airoha/patches-6.18/939-net-airoha-fix-wed-gdm-port-and-probe-cleanup.patch
+new file mode 100644
+index 0000000..054b5a0
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/939-net-airoha-fix-wed-gdm-port-and-probe-cleanup.patch
+@@ -0,0 +1,110 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: fix WED GDM port index and probe cleanup
++
++GDM ports are stored at id - 1. Checking slot 3 as GDM3 instead
++inspects the HG5585F GDM4 LAN1 device and falsely rejects WED with
++EBUSY. Keep managed device link removal with the driver core and
++report the exact failure stage even when verbose diagnostics are off.
++
++diff --git a/drivers/net/ethernet/airoha/airoha_ppe.c b/drivers/net/ethernet/airoha/airoha_ppe.c
++index 576259f6aad5ecd0b7637f6882bc8b5aca88747e..f7a48321a0d9b99aba36e626429f206659f32a58 100644
++--- a/drivers/net/ethernet/airoha/airoha_ppe.c
+++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
++@@ -394,14 +394,21 @@ static int airoha_ppe_set_wed(struct airoha_ppe_dev *dev, bool enable)
++ {
++ 	struct airoha_ppe *ppe = dev->priv;
++ 	struct airoha_eth *eth = ppe->eth;
+++	struct airoha_gdm_port *port;
++ 	int err = 0, i;
++ 
++ 	mutex_lock(&flow_offload_mutex);
++-	/* WED uses GDM3; GDM2 is the independent PON MAC. */
++-	if (enable && eth->ports[AIROHA_GDM3_IDX]) {
++-		for (i = 0; i < ARRAY_SIZE(eth->ports[AIROHA_GDM3_IDX]->devs); i++) {
++-			if (!eth->ports[AIROHA_GDM3_IDX]->devs[i])
+++	/* Hardware GDM IDs start at 1; airoha_alloc_gdm_port() stores id - 1.
+++	 * GDM4 is the HG5585F LAN1 port and does not conflict with WED GDM3.
+++	 */
+++	port = eth->ports[AIROHA_GDM3_IDX - 1];
+++	if (enable && port) {
+++		for (i = 0; i < ARRAY_SIZE(port->devs); i++) {
+++			if (!port->devs[i])
++ 				continue;
+++			dev_err(eth->dev,
+++				"hg5585f-wifi: component=ppe event=wed_port_busy port=%d nbq=%d\n",
+++				port->id, port->devs[i]->nbq);
++ 			err = -EBUSY;
++ 			goto out;
++ 		}
++diff --git a/drivers/net/ethernet/airoha/airoha_wed.c b/drivers/net/ethernet/airoha/airoha_wed.c
++index fc74178fa17a476fe5f80108ca0fa114139484f4..32781673ff91a4b1e79ded4cc65bb8b2db23161c 100644
++--- a/drivers/net/ethernet/airoha/airoha_wed.c
+++++ b/drivers/net/ethernet/airoha/airoha_wed.c
++@@ -65,6 +65,9 @@ struct airoha_wed {
++ 	bool tokens_reserved;
++ 	bool poisoned;
++ 	bool legacy;
+++	const char *last_attach_stage;
+++	int last_attach_error;
+++	u32 last_wdma_cfg;
++ };
++ 
++ static struct airoha_wed *airoha_wed1;
++@@ -552,6 +555,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 	bool legacy;
++ 	struct device_link *link = NULL;
++ 	int err = -ENODEV;
+++	u32 wdma_cfg = 0;
++ 
++ 	rcu_read_unlock();
++ 	if (wed->wlan.bus_type != MTK_WED_BUS_PCIE ||
++@@ -620,9 +624,9 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 		goto out;
++ 	}
++ 	stage = "wdma_busy";
++-	if (readl(aw->wdma + MTK_WDMA_GLO_CFG) &
++-	    (MTK_WDMA_GLO_CFG_TX_DMA_EN | MTK_WDMA_GLO_CFG_TX_DMA_BUSY)) {
++-		device_link_del(link);
+++	wdma_cfg = readl(aw->wdma + MTK_WDMA_GLO_CFG);
+++	if (wdma_cfg & (MTK_WDMA_GLO_CFG_TX_DMA_EN |
+++			MTK_WDMA_GLO_CFG_TX_DMA_BUSY)) {
++ 		airoha_ppe_put_dev(aw->ppe);
++ 		aw->ppe = NULL;
++ 		err = -EBUSY;
++@@ -664,7 +668,7 @@ static int airoha_wed_attach(struct mtk_wed_device *wed) __releases(RCU)
++ 			 legacy ? "npu" : "native", aw->irq);
++ 	goto out;
++ error:
++-	device_link_del(link);
+++	/* AUTOREMOVE_CONSUMER links belong to the core, including probe failure. */
++ 	if (aw->tokens_reserved) {
++ 		wed->wlan.offload_disable(wed);
++ 		aw->tokens_reserved = false;
++@@ -675,9 +679,15 @@ error:
++ 	wed->priv = NULL;
++ 	wed->airoha = false;
++ out:
+++	if (aw) {
+++		aw->last_attach_stage = stage;
+++		aw->last_attach_error = err;
+++		aw->last_wdma_cfg = wdma_cfg;
+++	}
++ 	if (err)
++-		airoha_wlan_dbg(&pci->dev, "wed", "event=attach_failed stage=%s error=%d",
++-				 stage, err);
+++		dev_err(&pci->dev,
+++			"hg5585f-wifi: component=wed event=attach_failed stage=%s error=%d wdma_cfg=0x%08x\n",
+++			stage, err, wdma_cfg);
++ 	mutex_unlock(&airoha_wed_lock);
++ 	of_node_put(np);
++ 	return err;
++@@ -783,6 +793,9 @@ static int airoha_wed_status_show(struct seq_file *s, void *data)
++ 		   aw->legacy ? "npu" : "native");
++ 	seq_printf(s, "ppe_configured: %u\ntokens_reserved: %u\n",
++ 		   aw->ppe_configured, aw->tokens_reserved);
+++	seq_printf(s, "last_attach_stage: %s\nlast_attach_error: %d\nlast_wdma_cfg: %08x\n",
+++		   aw->last_attach_stage ?: "none", aw->last_attach_error,
+++		   aw->last_wdma_cfg);
++ 	for (i = 0; i < MTK_WED_TX_QUEUES; i++) {
++ 		seq_printf(s, "tx%u_mib: %u\nwpdma_tx%u_mib: %u\n",
++ 			   i, readl(aw->base + MTK_WED_TX_MIB(i)),
+diff --git a/target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch b/target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch
+new file mode 100644
+index 0000000..a1d0c87
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch
+@@ -0,0 +1,228 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: trace WED attach stages, guard IRQ storms, default diagnostics on
++
++HG5585F mt7915e probe stalls after "enabling device" and CPU0 is
++starved in softirq. Log WED attach stages and raw WED status through
++airoha_wlan_dbg(), and default that switch on so the log exists while
++probing. Count interrupts at the WED irq_set_mask(0) entry called first
++by the mt7915 hard IRQ handler; past 20000 per second mask the WED
++sources and disable the line once with disable_irq_nosync(), reporting
++an error record. DMA ownership state (poisoned) is left untouched.
++
++diff --git a/drivers/net/ethernet/airoha/airoha_wed.c b/drivers/net/ethernet/airoha/airoha_wed.c
++--- a/drivers/net/ethernet/airoha/airoha_wed.c
+++++ b/drivers/net/ethernet/airoha/airoha_wed.c
++@@ -1,9 +1,12 @@
++ // SPDX-License-Identifier: GPL-2.0-only
++ /* EN7581 WED1/WDMA1 transmit provider for MT7916D. */
+++#include <linux/atomic.h>
++ #include <linux/bitfield.h>
++ #include <linux/dma-mapping.h>
++ #include <linux/debugfs.h>
+++#include <linux/interrupt.h>
++ #include <linux/iopoll.h>
+++#include <linux/jiffies.h>
++ #include <linux/module.h>
++ #include <linux/of_address.h>
++ #include <linux/of_platform.h>
++@@ -68,6 +71,9 @@
++ 	const char *last_attach_stage;
++ 	int last_attach_error;
++ 	u32 last_wdma_cfg;
+++	atomic_t irq_count;
+++	unsigned long irq_window;
+++	atomic_t irq_storm;
++ };
++ 
++ static struct airoha_wed *airoha_wed1;
++@@ -225,9 +231,44 @@
++ 	return 0;
++ }
++ 
+++#define AIROHA_WED_IRQ_STORM_LIMIT	20000
+++
+++/* Called from the mt7915 hard IRQ handler with mask 0 on every interrupt. */
+++static void airoha_wed_irq_storm_check(struct airoha_wed *aw)
+++{
+++	unsigned long now = jiffies, window = READ_ONCE(aw->irq_window);
+++	u32 raw, ext;
+++
+++	if (atomic_read(&aw->irq_storm))
+++		return;
+++	if (time_after(now, window + HZ) &&
+++	    cmpxchg(&aw->irq_window, window, now) == window)
+++		atomic_set(&aw->irq_count, 0);
+++	if (atomic_inc_return(&aw->irq_count) <= AIROHA_WED_IRQ_STORM_LIMIT ||
+++	    atomic_cmpxchg(&aw->irq_storm, 0, 1))
+++		return;
+++	/* Hard IRQ context: only the _nosync variant is safe here. */
+++	raw = readl(aw->base + MTK_WED_INT_STATUS);
+++	ext = readl(aw->base + MTK_WED_EXT_INT_STATUS);
+++	writel(0, aw->base + MTK_WED_INT_MASK);
+++	writel(0, aw->base + MTK_WED_EXT_INT_MASK);
+++	/* irq_storm was won above, so this runs once. quarantine/detach test
+++	 * irq_disabled under airoha_wed_lock and must not disable it again.
+++	 */
+++	WRITE_ONCE(aw->irq_disabled, true);
+++	disable_irq_nosync(aw->irq);
+++	dev_err(aw->dev,
+++		"hg5585f-wifi: component=wed event=irq_storm count=%d raw=%08x ext=%08x; WED irq %d disabled\n",
+++		atomic_read(&aw->irq_count), raw, ext, aw->irq);
+++}
+++
++ static void airoha_wed_irq_mask(struct mtk_wed_device *wed, u32 mask)
++ {
++-	if (airoha_wed_priv(wed)->poisoned)
+++	struct airoha_wed *aw = airoha_wed_priv(wed);
+++
+++	if (!mask)
+++		airoha_wed_irq_storm_check(aw);
+++	if (aw->poisoned || atomic_read(&aw->irq_storm))
++ 		mask = 0;
++ 	airoha_wed_write(wed, MTK_WED_INT_MASK, mask);
++ 	airoha_wed_read(wed, MTK_WED_INT_MASK);
++@@ -235,9 +276,15 @@
++ 
++ static u32 airoha_wed_irq_get(struct mtk_wed_device *wed, u32 mask)
++ {
++-	u32 status = airoha_wed_read(wed, MTK_WED_INT_STATUS) & mask;
++-	u32 errors = airoha_wed_read(wed, MTK_WED_EXT_INT_STATUS) & EN7581_WED_EXT_ERRORS;
+++	struct airoha_wed *aw = airoha_wed_priv(wed);
+++	u32 raw = airoha_wed_read(wed, MTK_WED_INT_STATUS);
+++	u32 ext = airoha_wed_read(wed, MTK_WED_EXT_INT_STATUS);
+++	u32 status = raw & mask;
+++	u32 errors = ext & EN7581_WED_EXT_ERRORS;
++ 
+++	/* Which status bits keep asserting; rate limited by the dbg macro. */
+++	airoha_wlan_dbg(aw->dev, "wed", "event=irq raw=%08x mask=%08x ext=%08x",
+++			raw, mask, ext);
++ 	if (status)
++ 		airoha_wed_write(wed, MTK_WED_INT_STATUS, status);
++ 	if (errors) {
++@@ -315,9 +362,9 @@
++ quarantine:
++ 	wed->dma_quarantined = true;
++ 	aw->poisoned = true;
++-	if (!aw->irq_disabled) {
+++	if (!READ_ONCE(aw->irq_disabled)) {
+++		WRITE_ONCE(aw->irq_disabled, true);
++ 		disable_irq(aw->irq);
++-		aw->irq_disabled = true;
++ 	}
++ 	return err;
++ }
++@@ -570,20 +617,24 @@
++ 		goto out;
++ 	if (aw->wlan || aw->poisoned) {
++ 		stage = "ownership";
+++		airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=ownership");
++ 		err = -EBUSY;
++ 		goto out;
++ 	}
++ 	stage = "pcie";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=pcie");
++ 	if (pci_domain_nr(pci->bus) != 1 ||
++ 	    upper_32_bits(pci_resource_start(pci, 0)))
++ 		goto out;
++ 	stage = "npu_supplier";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=npu_supplier");
++ 	npu = airoha_npu_get(&pci->dev);
++ 	if (IS_ERR(npu)) {
++ 		err = PTR_ERR(npu);
++ 		goto out;
++ 	}
++ 	stage = "firmware_abi";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=firmware_abi");
++ 	legacy = npu->wlan_abi == AIROHA_NPU_WLAN_ABI_HG5585F_2024;
++ 	if (legacy) {
++ 		/* Firmware names were checked by the supplier. PPE must be host-managed. */
++@@ -600,6 +651,7 @@
++ 	if (err)
++ 		goto out;
++ 	stage = "ppe_supplier";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=ppe_supplier");
++ 	aw->ppe = airoha_ppe_get_dev(&pci->dev);
++ 	if (IS_ERR(aw->ppe)) {
++ 		err = PTR_ERR(aw->ppe);
++@@ -608,6 +660,7 @@
++ 	}
++ 	if (legacy) {
++ 		stage = "ppe_prepare";
+++		airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=ppe_prepare");
++ 		err = aw->ppe->ops.prepare_legacy(aw->ppe);
++ 		if (err) {
++ 			airoha_ppe_put_dev(aw->ppe);
++@@ -616,6 +669,7 @@
++ 		}
++ 	}
++ 	stage = "device_link";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=device_link");
++ 	link = device_link_add(&pci->dev, aw->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
++ 	if (!link) {
++ 		airoha_ppe_put_dev(aw->ppe);
++@@ -624,6 +678,7 @@
++ 		goto out;
++ 	}
++ 	stage = "wdma_busy";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=wdma_busy");
++ 	wdma_cfg = readl(aw->wdma + MTK_WDMA_GLO_CFG);
++ 	if (wdma_cfg & (MTK_WDMA_GLO_CFG_TX_DMA_EN |
++ 			MTK_WDMA_GLO_CFG_TX_DMA_BUSY)) {
++@@ -639,25 +694,30 @@
++ 	wed->version = 1;
++ 	wed->airoha = true;
++ 	stage = "quiesce";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=quiesce");
++ 	err = airoha_wed_quiesce(wed);
++ 	if (err)
++ 		goto error;
++ 	stage = "reset";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=reset");
++ 	err = airoha_wed_reset(wed, MTK_WED_RESET_WED);
++ 	if (err)
++ 		goto error;
++ 	stage = "buffers";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=buffers");
++ 	err = airoha_wed_buffers_alloc(wed);
++ 	if (err)
++ 		goto error;
++ 	aw->tokens_reserved = true;
++ 	stage = "tokens";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=tokens");
++ 	err = wed->wlan.offload_enable(wed);
++ 	if (err) {
++ 		err = -ETIMEDOUT;
++ 		goto error;
++ 	}
++ 	stage = "ppe_enable";
+++	airoha_wlan_dbg(&pci->dev, "wed", "event=stage stage=ppe_enable");
++ 	err = aw->ppe->ops.set_wed(aw->ppe, true);
++ 	if (err)
++ 		goto error;
++@@ -716,9 +776,9 @@
++ 		}
++ 	} else {
++ 		aw->poisoned = true;
++-		if (!aw->irq_disabled) {
+++		if (!READ_ONCE(aw->irq_disabled)) {
+++			WRITE_ONCE(aw->irq_disabled, true);
++ 			disable_irq(aw->irq);
++-			aw->irq_disabled = true;
++ 		}
++ 	}
++ 	airoha_ppe_put_dev(aw->ppe);
++diff --git a/drivers/net/ethernet/airoha/airoha_npu.c b/drivers/net/ethernet/airoha/airoha_npu.c
++--- a/drivers/net/ethernet/airoha/airoha_npu.c
+++++ b/drivers/net/ethernet/airoha/airoha_npu.c
++@@ -19,9 +19,9 @@
++ #include "airoha_eth.h"
++ #include <linux/soc/airoha/airoha_wlan_legacy.h>
++ 
++-static bool wlan_debug;
+++static bool wlan_debug = true;
++ module_param(wlan_debug, bool, 0644);
++-MODULE_PARM_DESC(wlan_debug, "HG5585F wireless lifecycle diagnostics (default off)");
+++MODULE_PARM_DESC(wlan_debug, "HG5585F wireless lifecycle diagnostics (default on)");
++ 
++ bool airoha_wlan_debug_enabled(void)
++ {
+diff --git a/target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch b/target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch
+new file mode 100644
+index 0000000..6e1990f
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch
+@@ -0,0 +1,35 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: mask extended WED interrupts with normal IRQs
++
++An extended error such as RX_DRV_INIT_WDMA_EN can keep the shared WED
++interrupt asserted when the hard IRQ handler masks only INT_MASK. Mask
++EXT_INT_MASK at the same time, and restore both sources after the tasklet
++has acknowledged the pending status. Keep the existing storm guard and
++avoid enabling extended sources before DMA startup reaches irq_mask().
++
++diff --git a/drivers/net/ethernet/airoha/airoha_wed.c b/drivers/net/ethernet/airoha/airoha_wed.c
++index 6a1bf83e732b667f05e8be848f53833ed8bd3755..4b8026061100978894b1d5eed3cefd5714640d00 100644
++--- a/drivers/net/ethernet/airoha/airoha_wed.c
+++++ b/drivers/net/ethernet/airoha/airoha_wed.c
++@@ -270,6 +270,12 @@ static void airoha_wed_irq_mask(struct mtk_wed_device *wed, u32 mask)
++ 		airoha_wed_irq_storm_check(aw);
++ 	if (aw->poisoned || atomic_read(&aw->irq_storm))
++ 		mask = 0;
+++	/* An extended error asserts the same IRQ even if INT_MASK is zero.
+++	 * Keep both sources masked until the tasklet acknowledges the status.
+++	 */
+++	airoha_wed_write(wed, MTK_WED_EXT_INT_MASK,
+++			 mask ? EN7581_WED_EXT_ERRORS : 0);
+++	airoha_wed_read(wed, MTK_WED_EXT_INT_MASK);
++ 	airoha_wed_write(wed, MTK_WED_INT_MASK, mask);
++ 	airoha_wed_read(wed, MTK_WED_INT_MASK);
++ }
++@@ -511,7 +517,7 @@ static void airoha_wed_start(struct mtk_wed_device *wed, u32 mask)
++ 	writel(GENMASK(17, 16), aw->wdma + MTK_WDMA_INT_MASK);
++ 	writel(GENMASK(17, 16), aw->wdma + MTK_WDMA_INT_GRP2);
++ 	airoha_wed_write(wed, MTK_WED_WPDMA_INT_MASK, mask);
++-	airoha_wed_write(wed, MTK_WED_EXT_INT_MASK, EN7581_WED_EXT_ERRORS);
+++	/* airoha_wed_irq_mask() enables both IRQ sources after DMA setup. */
++ 	dma_wmb();
++ 	airoha_wed_rmw(wed, MTK_WED_WPDMA_GLO_CFG, 0, EN7581_WED_DMA_ENABLE);
++ 	airoha_wed_rmw(wed, MTK_WED_WDMA_GLO_CFG, 0, BIT(2));
+diff --git a/target/linux/airoha/patches-6.18/942-clk-en7523-fix-reset-control-state.patch b/target/linux/airoha/patches-6.18/942-clk-en7523-fix-reset-control-state.patch
+new file mode 100644
+index 0000000..6a957c8
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/942-clk-en7523-fix-reset-control-state.patch
+@@ -0,0 +1,47 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] clk: en7523: initialize reset values and propagate regmap errors
++
++Reset update used an uninitialized value when setting or clearing a bit.
++Assign the asserted/deasserted value explicitly for normal and inverted
++reset banks, and propagate update/read failures to reset consumers.
++
++diff --git a/drivers/clk/clk-en7523.c b/drivers/clk/clk-en7523.c
++--- a/drivers/clk/clk-en7523.c
+++++ b/drivers/clk/clk-en7523.c
++@@ -1033,14 +1033,12 @@
++ 
++ 	/* For PCIC reset logic is inverted, 0:assert 1:deassert*/
++ 	if (addr == REG_NP_SCU_PCIC)
++-		val |= assert ? 0 : BIT(id % RST_NR_PER_BANK);
+++		val = assert ? 0 : BIT(id % RST_NR_PER_BANK);
++ 	else
++-		val |= assert ? BIT(id % RST_NR_PER_BANK) : 0;
++-
++-	regmap_update_bits(rst_data->map, addr, BIT(id % RST_NR_PER_BANK),
++-			   val);
++-
++-	return 0;
+++		val = assert ? BIT(id % RST_NR_PER_BANK) : 0;
+++
+++	return regmap_update_bits(rst_data->map, addr,
+++				  BIT(id % RST_NR_PER_BANK), val);
++ }
++ 
++ static int en7523_reset_assert(struct reset_controller_dev *rcdev,
++@@ -1062,12 +1060,15 @@
++ 	u32 addr = rst_data->bank_ofs[id / RST_NR_PER_BANK];
++ 	bool inverted = false;
++ 	u32 val;
+++	int err;
++ 
++ 	/* For PCIC reset logic is inverted, 0:assert 1:deassert*/
++ 	if (addr == REG_NP_SCU_PCIC)
++ 		inverted = true;
++ 
++-	regmap_read(rst_data->map, addr, &val);
+++	err = regmap_read(rst_data->map, addr, &val);
+++	if (err)
+++		return err;
++ 	val &= BIT(id % RST_NR_PER_BANK);
++ 	return inverted ? !val : !!val;
++ }
+diff --git a/target/linux/airoha/patches-6.18/943-net-airoha-fix-npu-probe-reset-lifecycle.patch b/target/linux/airoha/patches-6.18/943-net-airoha-fix-npu-probe-reset-lifecycle.patch
+new file mode 100644
+index 0000000..dade5c3
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/943-net-airoha-fix-npu-probe-reset-lifecycle.patch
+@@ -0,0 +1,148 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: avoid reset-held MMIO during legacy NPU probe retry
++
++A probe retry can inherit NPU and GDMA blocks already held in reset.
++Do not poll the GDMA register window in that state. Verify deassertion
++before accessing either block, and reject missing/invalid firmware before
++changing reset ownership or allocating DMA. Keep lifecycle stages behind
++the existing wireless debug switch.
++
++diff --git a/drivers/net/ethernet/airoha/airoha_npu.c b/drivers/net/ethernet/airoha/airoha_npu.c
++--- a/drivers/net/ethernet/airoha/airoha_npu.c
+++++ b/drivers/net/ethernet/airoha/airoha_npu.c
++@@ -299,11 +299,23 @@
++ 	return state < 0 ? state : err;
++ }
++ 
+++static int airoha_npu_deassert_reset(struct reset_control *reset)
+++{
+++	int state, err;
+++
+++	err = reset_control_deassert(reset);
+++	if (err)
+++		return err;
+++	err = read_poll_timeout(reset_control_status, state, state <= 0,
+++				100, 10000, false, reset);
+++	return state < 0 ? state : err;
+++}
+++
++ static int airoha_npu_legacy_stop(struct airoha_npu *npu)
++ {
++ 	struct airoha_npu_legacy *legacy = npu->legacy;
++ 	struct airoha_npu_core *core = &npu->cores[0];
++-	int err, dma_err, drain_err = 0, i;
+++	int err, dma_err, npu_state, dma_state, drain_err = 0, i;
++ 	u32 value;
++ 
++ 	lockdep_assert_held(&legacy->lock);
++@@ -319,7 +331,10 @@
++ 	spin_lock_bh(&core->lock);
++ 	WRITE_ONCE(legacy->blocked, true);
++ 	spin_unlock_bh(&core->lock);
++-	if (reset_control_status(legacy->npu_reset) == 0) {
+++	npu_state = reset_control_status(legacy->npu_reset);
+++	airoha_wlan_dbg(npu->dev, "npu", "event=stop_stage stage=mask_irqs npu_reset=%d",
+++			npu_state);
+++	if (!npu_state) {
++ 		regmap_write(npu->regmap, REG_CR_MBOX_INT_STATUS,
++ 			     MBOX_INT_STATUS_MASK);
++ 		for (i = 0; i < 2; i++)
++@@ -343,11 +358,25 @@
++ 	/* Stop request producers, drain the independent copy engine, then hold
++ 	 * both blocks in reset. A timeout never grants permission to free DMA.
++ 	 */
+++	airoha_wlan_dbg(npu->dev, "npu", "event=stop_stage stage=npu_reset");
++ 	err = airoha_npu_assert_reset(legacy->npu_reset);
++-	if (!err)
++-		drain_err = readl_poll_timeout(legacy->gdma +
++-			LEGACY_GDMA_CTRL0(LEGACY_RX_COPY_CHANNEL), value,
++-			!(value & LEGACY_GDMA_BUSY), 10, 100000);
+++	if (!err && npu_state < 0)
+++		err = npu_state;
+++	if (!err) {
+++		dma_state = reset_control_status(legacy->gdma_reset);
+++		airoha_wlan_dbg(npu->dev, "npu", "event=stop_stage stage=gdma_drain gdma_reset=%d",
+++				dma_state);
+++		/* A deferred probe can arrive with GDMA already held in reset.
+++		 * Its MMIO window must not be read until reset is deasserted.
+++		 */
+++		if (dma_state < 0)
+++			drain_err = dma_state;
+++		else if (!dma_state)
+++			drain_err = readl_poll_timeout(legacy->gdma +
+++				LEGACY_GDMA_CTRL0(LEGACY_RX_COPY_CHANNEL), value,
+++				!(value & LEGACY_GDMA_BUSY), 10, 100000);
+++	}
+++	airoha_wlan_dbg(npu->dev, "npu", "event=stop_stage stage=gdma_reset");
++ 	dma_err = airoha_npu_assert_reset(legacy->gdma_reset);
++ 	if (!err)
++ 		err = drain_err ? drain_err : dma_err;
++@@ -1295,6 +1324,35 @@
++ 	return 0;
++ }
++ 
+++static int airoha_npu_legacy_firmware_ready(struct airoha_npu *npu)
+++{
+++	const unsigned int limits[] = { NPU_EN7581_FIRMWARE_RV32_MAX_SIZE,
+++					NPU_EN7581_FIRMWARE_DATA_MAX_SIZE };
+++	const struct firmware *fw;
+++	const char *names[2];
+++	int i, err;
+++
+++	if (npu->wlan_abi != AIROHA_NPU_WLAN_ABI_HG5585F_2024)
+++		return 0;
+++	err = of_property_read_string_array(npu->dev->of_node, "firmware-name",
+++					    names, ARRAY_SIZE(names));
+++	if (err != ARRAY_SIZE(names))
+++		return err < 0 ? err : -EINVAL;
+++	for (i = 0; i < ARRAY_SIZE(names); i++) {
+++		err = request_firmware_direct(&fw, names[i], npu->dev);
+++		if (err)
+++			return dev_err_probe(npu->dev,
+++					     err == -ENOENT ? -EPROBE_DEFER : err,
+++					     "waiting for NPU firmware %s\n", names[i]);
+++		err = !fw->size ? -EINVAL : (fw->size > limits[i] ? -E2BIG : 0);
+++		release_firmware(fw);
+++		if (err)
+++			return dev_err_probe(npu->dev, err,
+++					     "invalid NPU firmware size: %s\n", names[i]);
+++	}
+++	return 0;
+++}
+++
++ static int airoha_npu_boot(struct airoha_npu *npu, void __iomem *base,
++ 			   struct resource *region)
++ {
++@@ -1304,14 +1362,16 @@
++ 	if (legacy) {
++ 		lockdep_assert_held(&legacy->lock);
++ 		legacy->state = LEGACY_RUNNING;
++-		err = reset_control_deassert(legacy->gdma_reset);
+++		airoha_wlan_dbg(npu->dev, "npu", "event=boot_stage stage=gdma_deassert");
+++		err = airoha_npu_deassert_reset(legacy->gdma_reset);
++ 		if (err)
++ 			return err;
++ 		/* Discard the verified RX copy channel's state before NPU boot. */
++ 		for (i = 0; i < 4; i++)
++ 			writel(0, legacy->gdma + (LEGACY_RX_COPY_CHANNEL << 4) + i * 4);
++ 		readl(legacy->gdma + LEGACY_GDMA_CTRL0(LEGACY_RX_COPY_CHANNEL));
++-		err = reset_control_deassert(legacy->npu_reset);
+++		airoha_wlan_dbg(npu->dev, "npu", "event=boot_stage stage=npu_deassert");
+++		err = airoha_npu_deassert_reset(legacy->npu_reset);
++ 		if (err)
++ 			return err;
++ 		for (i = 0; i < 2; i++) {
++@@ -1374,6 +1434,13 @@
++ 	err = airoha_npu_wlan_select_abi(npu);
++ 	if (err)
++ 		return err;
+++	/* Probe may run before the root filesystem exposes the firmware.
+++	 * Defer without resetting hardware or allocating DMA in that case.
+++	 */
+++	airoha_wlan_dbg(dev, "npu", "event=probe_stage stage=firmware_check");
+++	err = airoha_npu_legacy_firmware_ready(npu);
+++	if (err)
+++		return err;
++ 	npu->ops.ppe_init = airoha_npu_ppe_init;
++ 	npu->ops.ppe_deinit = airoha_npu_ppe_deinit;
++ 	npu->ops.ppe_init_stats = airoha_npu_ppe_stats_setup;
+diff --git a/target/linux/airoha/patches-6.18/944-net-airoha-ppe-clear-stale-enable.patch b/target/linux/airoha/patches-6.18/944-net-airoha-ppe-clear-stale-enable.patch
+new file mode 100644
+index 0000000..28ddd55
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/944-net-airoha-ppe-clear-stale-enable.patch
+@@ -0,0 +1,48 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: clear stale host-managed PPE enable
++
++The HG5585F boots with PPE enable bits set while its flow table is empty.
++Host-managed PPE takeover must clear that stale state before programming
++its tables; otherwise host_start returns -EBUSY and the MT7916 probe fails
++at npu_init. Preserve a genuinely busy PPE as an ownership conflict.
++
++diff --git a/drivers/net/ethernet/airoha/airoha_ppe.c b/drivers/net/ethernet/airoha/airoha_ppe.c
++--- a/drivers/net/ethernet/airoha/airoha_ppe.c
+++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
++@@ -324,15 +324,32 @@
++ static int airoha_ppe_host_start(struct airoha_ppe *ppe)
++ {
++ 	struct airoha_eth *eth = ppe->eth;
++-	int i;
+++	int i, err;
+++	u32 val;
++ 
++ 	if (ppe->host_fault)
++ 		return -EIO;
++ 
++-	for (i = 0; i < eth->soc->num_ppe; i++)
++-		if (airoha_fe_rr(eth, REG_PPE_GLO_CFG(i)) &
++-		    (PPE_GLO_CFG_BUSY_MASK | PPE_GLO_CFG_EN_MASK))
+++	/* HG5585F boots with PPE enable bits set while the tables are empty.
+++	 * The host-managed ABI owns PPE, so clear stale enable state before
+++	 * publishing the new table. A busy bit still means another owner is
+++	 * using the engine and must fail without touching its state.
+++	 */
+++	for (i = 0; i < eth->soc->num_ppe; i++) {
+++		val = airoha_fe_rr(eth, REG_PPE_GLO_CFG(i));
+++		if (val & PPE_GLO_CFG_BUSY_MASK)
++ 			return -EBUSY;
+++		if (!(val & PPE_GLO_CFG_EN_MASK))
+++			continue;
+++		airoha_fe_clear(eth, REG_PPE_GLO_CFG(i), PPE_GLO_CFG_EN_MASK);
+++		err = read_poll_timeout(airoha_fe_rr, val,
+++					!(val & (PPE_GLO_CFG_BUSY_MASK |
+++						PPE_GLO_CFG_EN_MASK)),
+++					USEC_PER_MSEC, 100 * USEC_PER_MSEC,
+++					false, eth, REG_PPE_GLO_CFG(i));
+++		if (err)
+++			return err;
+++	}
++ 
++ 	ppe->host_started = true;
++ 	airoha_ppe_host_config(ppe);
+diff --git a/target/linux/airoha/patches-6.18/945-net-airoha-match-hg5585f-npu-input-ring.patch b/target/linux/airoha/patches-6.18/945-net-airoha-match-hg5585f-npu-input-ring.patch
+new file mode 100644
+index 0000000..55f6142
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/945-net-airoha-match-hg5585f-npu-input-ring.patch
+@@ -0,0 +1,20 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: match the HG5585F NPU firmware input ring length
++
++The stock RV32 firmware advances input consumers through index 767 before
++wrapping. Initializing only 512 entries leaves its consumer outside the
++initialized ring, fills the Wi-Fi RX ring and blocks further association.
++Use 768 input descriptors; the 256-entry CPU return rings are unchanged.
++
++diff --git a/include/linux/soc/airoha/airoha_wlan_legacy.h b/include/linux/soc/airoha/airoha_wlan_legacy.h
++--- a/include/linux/soc/airoha/airoha_wlan_legacy.h
+++++ b/include/linux/soc/airoha/airoha_wlan_legacy.h
++@@ -17,7 +17,7 @@
++ #define AIROHA_WLAN_LEGACY_RX_DESC_COUNT	256
++ #define AIROHA_WLAN_LEGACY_RX_BUF_BYTES	1725
++ #define AIROHA_WLAN_LEGACY_RX_MAX_FRAGS	7
++-#define AIROHA_WLAN_LEGACY_INPUT_COUNT	512
+++#define AIROHA_WLAN_LEGACY_INPUT_COUNT	768
++ #define AIROHA_WLAN_LEGACY_PKT_COUNT	3000
++ #define AIROHA_WLAN_LEGACY_PKT_BYTES	2048
++ #define AIROHA_WLAN_LEGACY_BA_BYTES	0x80000

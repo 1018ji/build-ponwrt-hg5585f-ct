@@ -4,68 +4,24 @@
   "exported_from": "new",
   "patches": [
     {
-      "name": "0001-hg5585f-foundation.patch",
-      "sha256": "6483e73d74875dbd9488a0b0aa39b799ab285fb98732b06f86388398459af68c"
+      "name": "0001-hg5585f-platform.patch",
+      "sha256": "fb78e48aecf6126df686e1c8869cbd9519ad393a1b750d5871ecd3541ece6e70"
     },
     {
-      "name": "0002-hg5585f-wifi-base.patch",
-      "sha256": "34477e46ccbb1b7ab18b36f4eca75a70c237507f8d16ad1000de00c9a3b0fedd"
+      "name": "0002-hg5585f-offload.patch",
+      "sha256": "6b225fdc7d3a484860421e2a33bef657e9d671af1bbef6b08e89f69a6458c45b"
     },
     {
-      "name": "0003-hg5585f-wed-base.patch",
-      "sha256": "f28ceb82506a3e7a129175208945b20cf13e49e9d0af1948dc313d3bd542ef30"
+      "name": "0003-hg5585f-recovery.patch",
+      "sha256": "6eb3a66d18d7f64f86d697dfbaab495d19521db8cebd432cc79bde9ee2bc79aa"
     },
     {
-      "name": "0004-hg5585f-npu-integration.patch",
-      "sha256": "e8232ee7cbadfd4b7dafdec216223f4f256e6bf857f4f45ee607a48f8e2cd3b7"
+      "name": "0004-hg5585f-diagnostics.patch",
+      "sha256": "7c425cdd47dc279e6a4eaee1a77c1bfe7cd100aa7f023542d2d81ea446f13377"
     },
     {
-      "name": "0005-hg5585f-flowtable.patch",
-      "sha256": "160f21c7b013d7a199eefac59cb259ee50c6b0fb321300a023c2fd00ee26352a"
-    },
-    {
-      "name": "0006-hg5585f-wed-runtime.patch",
-      "sha256": "72048c6c73eb4f3f89d40e20b0099e1442ae1df36b86633780ad8e94c89afeed"
-    },
-    {
-      "name": "0007-hg5585f-wed-diagnostics.patch",
-      "sha256": "5ed1f71706554e6d616209139d3f1a682c463595158a4193b25a2c8a5e73cdd6"
-    },
-    {
-      "name": "0008-hg5585f-single-npu-profile.patch",
-      "sha256": "ef52c830065b3ee51ab7f0f661eb3f0d6595389a68a5cdaa50c1562b71a0b637"
-    },
-    {
-      "name": "0009-hg5585f-wed-stop-recovery.patch",
-      "sha256": "be6f64f74eee50e858528f973b6aa6a839bf5bf83af552f1b4fbe0755092d07b"
-    },
-    {
-      "name": "0010-hg5585f-wifi-dma-recovery.patch",
-      "sha256": "7a53856487efd325b3a2af25c7fd5719e1a72b37efdda6b7a7f1b1c10fe992a9"
-    },
-    {
-      "name": "0011-hg5585f-fix-linux-recovery-test-type.patch",
-      "sha256": "f4708f8aa667ea59ceb708d36291f413576bbcec38933957aaba1b3eeaf7fe0e"
-    },
-    {
-      "name": "0012-hg5585f-combine-wifi-debug-switches.patch",
-      "sha256": "adb30b8df84720ced61075e2a512cfe1b7fb3674b57010d902c617c2df438731"
-    },
-    {
-      "name": "0013-hg5585f-disable-wed-diagnostic-hotpath.patch",
-      "sha256": "8fc805555e9182caef77594969782a9f0f7fd741a6268d193693680408a0f7de"
-    },
-    {
-      "name": "0014-hg5585f-stub-wed-diagnostic-switch-test.patch",
-      "sha256": "3455985b2501e06a80c01da7346f4915419b9ee817508f9e7d38d86434bfcba2"
-    },
-    {
-      "name": "0015-hg5585f-add-airoha-npu-luci-app.patch",
-      "sha256": "833a75eba528a71a5419710f2807fe646eb00c537a9af2ec7ce3667e22afa605"
-    },
-    {
-      "name": "0016-hg5585f-remove-post-build-simulation-tests.patch",
-      "sha256": "15f7b64ca274436fc342faa2eac1630860ba3460b999142e156cb91fa577d1e8"
+      "name": "0005-hg5585f-luci-and-build-cleanup.patch",
+      "sha256": "ed58a884ca7e2d2739c9f7aa12fcced5d9259ae5ee6baf8f21cd0544f69d0bba"
     }
   ],
   "files": {

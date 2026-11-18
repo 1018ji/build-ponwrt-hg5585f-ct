@@ -44,13 +44,17 @@ def select(trees, current):
 def upgrade(source, path, current):
     source = source.resolve()
     previous = json.loads(path.read_text())
-    assert compatible(previous, current), \
-        'Incremental build requires the same source commit and an unchanged prefix of patches'
     assert run('git', 'rev-parse', '--show-toplevel', cwd=source, capture=True).stdout.strip() == str(source)
-    assert run('git', 'rev-parse', 'HEAD', cwd=source, capture=True).stdout.strip() == current['source_commit']
+    assert run('git', 'rev-parse', 'HEAD', cwd=source, capture=True).stdout.strip() == current['source_commit'], \
+        'Incremental build requires the same source commit'
+    # A squash/rebase can replace the patch history while leaving the exported
+    # source identical. Reuse that tree without replaying an incompatible
+    # historical prefix; stale trees still go through the strict check below.
     if matches(source, current):
         print('PASS: existing source already matches the current recipe')
         return
+    assert compatible(previous, current), \
+        'Incremental build requires the same source commit and an unchanged prefix of patches'
     for name in previous['files']:
         assert not Path(name).is_absolute() and '..' not in Path(name).parts
     assert matches(source, previous), \
