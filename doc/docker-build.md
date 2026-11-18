@@ -35,7 +35,7 @@ bash scripts/build-docker.sh build
 - 构建或复用 `hg5585f-builder:ubuntu22.04` 镜像；
 - 复用 `hg5585f-ubuntu22-<架构>` volume；
 - 以只读方式挂载当前仓库到容器 `/recipe`；
-- 挂载 `/Users/happyelements/Desktop/刷机/run` 到容器 `/run`；
+- 挂载仓库上一级目录下的 `run` 到容器 `/run`，也可用 `HG5585F_RUN_DIR` 覆盖；
 - 在 `/workdir/code/openwrt` 保持固定源码路径；
 - 首次运行 clone 源码，后续只应用新增补丁；
 - 使用宿主机逻辑 CPU 执行 `make -jN`；
@@ -87,11 +87,13 @@ recipe 的补丁序列保持追加式更新。修改已有补丁或改变 pinned
 ## 手动运行 image
 
 ```bash
-mkdir -p /Users/happyelements/Desktop/刷机/run
+recipe=$(pwd -P)
+run_dir=$(dirname -- "$recipe")/run
+mkdir -p "$run_dir"
 docker run --rm --init -it \
   --name hg5585f-local-build \
-  --mount type=bind,source=/Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct,target=/recipe,readonly \
-  --mount type=bind,source=/Users/happyelements/Desktop/刷机/run,target=/run \
+  --mount "type=bind,source=$recipe,target=/recipe,readonly" \
+  --mount "type=bind,source=$run_dir,target=/run" \
   --mount type=volume,source=hg5585f-ubuntu22-aarch64,target=/workdir \
   --env HG5585F_JOBS=6 \
   --env HG5585F_RECIPE_COMMIT="$(git rev-parse HEAD)" \

@@ -35,7 +35,7 @@ if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then
 Usage: bash scripts/build-docker.sh [build|shell|check]
 
 Build HG5585F firmware in Ubuntu 22.04 using one persistent Docker volume.
-HG5585F_RUN_DIR defaults to /Users/happyelements/Desktop/刷机/run.
+HG5585F_RUN_DIR defaults to the run directory beside this repository.
 HG5585F_JOBS defaults to the host logical CPU count and is passed to make -j.
 The source tree, downloads, toolchain and ccache are reused automatically.
 Logs and validated .itb files go directly into run/<recipe commit short ID>.
@@ -45,7 +45,7 @@ fi
 mode=${1:-build}
 case "$mode" in build|shell|check) ;; *) echo 'Expected build, shell or check' >&2; exit 2 ;; esac
 recipe=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-run_dir=${HG5585F_RUN_DIR:-/Users/happyelements/Desktop/刷机/run}
+run_dir=${HG5585F_RUN_DIR:-$(dirname -- "$recipe")/run}
 mkdir -p "$run_dir"
 run_dir=$(cd -- "$run_dir" && pwd -P)
 recipe_commit=$(git -C "$recipe" rev-parse --verify HEAD)
