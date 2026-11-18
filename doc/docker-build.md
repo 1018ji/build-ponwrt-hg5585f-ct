@@ -1,10 +1,22 @@
 # HG5585F 本地 Docker 编译
 
-本地编译使用 Ubuntu 22.04 Docker 镜像。宿主机的 `/Users/happyelements/Desktop/刷机/编译` 只保存固件和日志；源码、工具链、下载包和 ccache 保存在 Docker volume 中，重复编译会复用它们。
+本地构建使用一个持久 Docker volume 保存源码、工具链、下载包和 ccache。宿主机只挂载 `run` 目录，用来保存构建日志和已经验证过的 `.itb` 固件。
 
-## 宿主机一键编译
+工作区结构如下：
 
-在仓库根目录执行：
+```text
+Docker volume /workdir
+├── code/openwrt       固定源码路径
+├── code/recipe        当前 recipe 快照
+├── dl                 OpenWrt 下载缓存
+└── ccache             编译缓存
+
+宿主机 run/
+├── log/<时间戳>/       steps、download、build、validation、ccache 日志
+└── target/<时间戳>/    本次验证通过的 *.itb
+```
+
+## 编译
 
 ```bash
 cd /Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct
@@ -14,174 +26,79 @@ bash scripts/build-docker.sh build
 脚本会自动：
 
 - 构建或复用 `hg5585f-builder:ubuntu22.04` 镜像；
-- 创建或复用 `hg5585f-ubuntu22-<架构>` volume；
-- 挂载仓库到容器 `/recipe`；
-- 挂载 `/Users/happyelements/Desktop/刷机/编译` 到容器 `/output`；
-- 使用宿主机逻辑 CPU 数执行 `make -jN`；
-- 编译 native、WED、NPU 三组固件。
+- 复用 `hg5585f-ubuntu22-<架构>` volume；
+- 以只读方式挂载当前仓库到容器 `/recipe`；
+- 挂载 `/Users/happyelements/Desktop/刷机/run` 到容器 `/run`；
+- 在 `/workdir/code/openwrt` 保持固定源码路径；
+- 首次运行 clone 源码，后续只应用新增补丁；
+- 使用宿主机逻辑 CPU 执行 `make -jN`；
+- 验证成功后，把本次生成的 `.itb` 复制到 `run/target/<时间戳>`；
+- 把完整构建日志写入 `run/log/<同一时间戳>`。
 
-手动指定并发任务数：
+指定并发任务数：
 
 ```bash
 HG5585F_JOBS=6 bash scripts/build-docker.sh build
 ```
 
-`HG5585F_JOBS` 就是传给 `make -j` 的任务数。你的 M5 默认读取为 10 个逻辑核心，即 `make -j10`。
-
-## 更新补丁后的增量编译
-
-宿主机执行下面的命令，复用 volume 中兼容的旧源码目录：
+正常构建不需要 `--reuse` 参数。`shell` 和 `check` 仍可作为模式使用：
 
 ```bash
-cd /Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct
-HG5585F_JOBS=6 bash scripts/build-docker.sh --reuse build
+bash scripts/build-docker.sh shell
+bash scripts/build-docker.sh check
 ```
 
-如果已经在旧容器 shell 中，用只读挂载的最新脚本执行：
+## 固件和日志
 
-```bash
-HG5585F_REUSE_TREE=1 HG5585F_JOBS=6 bash /recipe/docker/build.sh build
+每次成功构建都会留下独立目录，例如：
+
+```text
+run/log/20261118-012205/
+run/target/20261118-012205/
 ```
 
-`--reuse` 会校验旧构建的 manifest，保持源码的绝对路径不变，只应用新追加的补丁。工具链、下载包、软件包构建状态和 ccache 会继续保留。若原有补丁被修改或基准源码版本改变，会新建独立构建目录；检测到旧源码被本地修改时会停止，保留修改。
+固件归档只包含 `.itb`。脚本会先完成编译后验证，再通过临时目录复制并改名，失败的构建不会产生完整固件目录。时间戳冲突时会追加序号。
 
-本次新增内核补丁时，OpenWrt 可能重新准备、编译内核并重新打包固件，ccache 会加速重复编译。不能保证只重新编译单个驱动对象。每次成功准备源码后会记录 `.hg5585f-source.json`，用于下一次增量校验。
+## 增量构建
 
-## 宿主机单独构建 image
+源码和编译缓存位于同一个 Docker volume，源码路径固定，因此重复执行同一命令会复用：
 
-```bash
-cd /Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct
-docker build -t hg5585f-builder:ubuntu22.04 docker
-```
+- OpenWrt `build_dir`、`staging_dir` 和 toolchain；
+- `/workdir/dl` 下载缓存；
+- `/workdir/ccache` 编译缓存；
+- 已生成的配置和软件包构建状态。
 
-确认镜像：
+recipe 的补丁序列保持追加式更新。修改已有补丁或改变 pinned source commit 时，增量升级会停止并报告原因；这时需要明确处理旧源码和相关构建状态，脚本不会自动混用它们。
 
-```bash
-docker image inspect hg5585f-builder:ubuntu22.04
-```
+已有旧版 volume 中如果存在兼容的 `trees/<旧 recipe>`，首次切换时会通过 `code` 软链接继续使用它，避免立即重新 clone；后续构建仍使用同一份源码和缓存。
 
-## 宿主机直接运行 image
-
-Apple Silicon 使用 `aarch64` volume：
+## 手动运行 image
 
 ```bash
-mkdir -p /Users/happyelements/Desktop/刷机/编译
+mkdir -p /Users/happyelements/Desktop/刷机/run/log \
+         /Users/happyelements/Desktop/刷机/run/target
 docker run --rm --init -it \
   --name hg5585f-local-build \
   --mount type=bind,source=/Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct,target=/recipe,readonly \
-  --mount type=bind,source=/Users/happyelements/Desktop/刷机/编译,target=/output \
+  --mount type=bind,source=/Users/happyelements/Desktop/刷机/run,target=/run \
   --mount type=volume,source=hg5585f-ubuntu22-aarch64,target=/workdir \
   --env HG5585F_JOBS=6 \
   hg5585f-builder:ubuntu22.04 build
 ```
 
-如果 Docker 显示的架构不是 `aarch64`，先查看：
+如果 Docker 显示的架构不是 `aarch64`，把 volume 名称中的架构替换为 `docker info --format '{{.Architecture}}'` 的结果。
 
-```bash
-docker info --format '{{.Architecture}}'
-```
-
-然后把 volume 名称中的 `aarch64` 换成实际架构。
-
-## 进入容器
-
-使用仓库脚本进入：
-
-```bash
-bash scripts/build-docker.sh shell
-```
-
-脚本会进入 `/workdir`，并保留源码和缓存。
-
-手动进入已经运行的容器：
-
-```bash
-docker exec -it hg5585f-local-build bash
-```
-
-如果容器没有运行，直接启动 shell：
-
-```bash
-docker run --rm --init -it \
-  --name hg5585f-local-shell \
-  --mount type=bind,source=/Users/happyelements/Desktop/刷机/build-ponwrt-hg5585f-ct,target=/recipe,readonly \
-  --mount type=bind,source=/Users/happyelements/Desktop/刷机/编译,target=/output \
-  --mount type=volume,source=hg5585f-ubuntu22-aarch64,target=/workdir \
-  --env HG5585F_JOBS=6 \
-  hg5585f-builder:ubuntu22.04 shell
-```
-
-## 容器内执行命令
-
-进入容器后，先做环境检查：
-
-```bash
-/usr/local/bin/build.sh check
-```
-
-开始或继续编译：
-
-```bash
-HG5585F_JOBS=6 /usr/local/bin/build.sh build
-```
-
-不设置 `HG5585F_JOBS` 时，容器默认使用 `nproc` 检测到的 CPU 数量。源码目录和当前构建状态位于：
-
-```bash
-ls -lah /workdir/trees
-find /workdir/trees -maxdepth 3 -type d -name openwrt -print
-```
-
-查看输出：
-
-```bash
-find /output -maxdepth 2 -type f | sort
-```
-
-退出容器：
-
-```bash
-exit
-```
-
-## 输出和日志
-
-宿主机输出目录下按 recipe 哈希分目录：
-
-```text
-/Users/happyelements/Desktop/刷机/编译/<recipe-hash>/
-```
-
-常见文件：
-
-- `*.itb`、`*.bin`：固件；
-- `sha256sums`：校验文件；
-- `steps.log`：每一步的开始、结束、失败和耗时；
-- `download.log`：源码下载日志；
-- `build.log`：编译日志；
-- `validation.log`：编译后验证日志；
-- `ccache.log`：编译缓存统计。
-
-## 缓存和清理
+## 检查和清理
 
 查看 volume：
 
 ```bash
 docker volume ls | grep hg5585f-ubuntu22
-```
-
-查看 volume 占用：
-
-```bash
 docker system df -v
 ```
 
-不要删除 `hg5585f-ubuntu22-aarch64`，否则源码、工具链、下载包和 ccache 都会丢失，需要重新准备。
-
-确认清理后再删除：
+不要在增量构建前删除 volume。删除它会同时清除源码、toolchain、下载包和 ccache。
 
 ```bash
 docker volume rm hg5585f-ubuntu22-aarch64
 ```
-
-清理不会删除宿主机 `/Users/happyelements/Desktop/刷机/编译` 中已经导出的固件和日志。

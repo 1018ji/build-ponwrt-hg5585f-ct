@@ -70,24 +70,30 @@ esac
 
 jobs=${HG5585F_JOBS:-$(nproc)}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'HG5585F_JOBS must be a positive integer' >&2; exit 2; }
-bundle=$(sha256sum /recipe/source.json | cut -c1-16)
-build_root=/workdir/trees/$bundle
+exec 9>/workdir/.build.lock
+flock -n 9 || { echo 'Another HG5585F build is already running' >&2; exit 1; }
+build_root=/workdir/code
 recipe=$build_root/recipe
 source=$build_root/openwrt
-output=/output/$bundle
-export build_root recipe source output
-# Keep the original absolute path: cached tools and make dependency files use it.
-if [ "${HG5585F_REUSE_TREE:-0}" = 1 ] && [ ! -d "$source" ]; then
-  previous=$(python3 /recipe/scripts/upgrade-source.py select /workdir/trees)
-  if [ -n "$previous" ]; then
-    build_root=$previous
-    recipe=$build_root/recipe
-    source=$build_root/openwrt
-    log "INFO  Reusing verified source at $source for bundle=$bundle"
-  else
-    log 'INFO  No compatible previous tree; preparing a separate build tree'
+run_root=/run
+target_root=$run_root/target
+build_id=$(date '+%Y%m%d-%H%M%S')
+suffix=0
+while [ -e "$run_root/log/$build_id" ] || [ -e "$target_root/$build_id" ]; do
+  suffix=$((suffix + 1))
+  build_id=$(printf '%s-%02d' "$(date '+%Y%m%d-%H%M%S')" "$suffix")
+done
+output=$run_root/log/$build_id
+export build_root recipe source output target_root build_id
+if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
+  if previous=$(python3 /recipe/scripts/upgrade-source.py select /workdir/trees); then
+    if [ -n "$previous" ]; then
+      ln -s "$previous" "$build_root"
+      log "INFO  Reusing compatible source tree through $build_root"
+    fi
   fi
 fi
+mkdir -p "$recipe" "$output" "$target_root" /workdir/dl /workdir/ccache
 # Save the previous recipe before the snapshot replaces it.
 if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
   if [ ! -f "$recipe/source.json" ]; then
@@ -96,10 +102,9 @@ if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
   fi
   cp "$recipe/source.json" "$source/.hg5585f-source.json"
 fi
-mkdir -p "$recipe" "$output" /workdir/dl /workdir/ccache
 : > "$output/steps.log"
 log_file=$output/steps.log
-log "INFO  Build bundle=$bundle jobs=$jobs source=$source"
+log "INFO  Build id=$build_id jobs=$jobs source=$source"
 step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 export CCACHE_DIR=/workdir/ccache CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
 export GITHUB_WORKSPACE="$recipe"
@@ -139,7 +144,17 @@ log "INFO  Firmware build uses make -j$jobs"
 if ! step 'Compile native, WED and NPU firmware' bash -o pipefail -c "make -j\"$jobs\" 2>&1 | tee \"$output/build.log\""; then
   step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s 2>&1 | tee -a \"$output/build.log\""
 fi
-step 'Copy firmware and build metadata to output' bash -o pipefail -c "cp -a bin/targets/airoha/an7581/. \"$output/\"; cp \"$recipe/source.json\" \"$output/source.json\""
 step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
+step 'Archive validated firmware images' bash -euo pipefail -c '
+  image_dir=bin/targets/airoha/an7581
+  archive="$target_root/$build_id"
+  temporary=$(mktemp -d "$target_root/.$build_id.XXXXXX")
+  trap '\''rm -rf "$temporary"'\'' EXIT
+  find "$image_dir" -maxdepth 1 -type f -name "*.itb" -exec cp -a {} "$temporary/" \;
+  test "$(find "$temporary" -maxdepth 1 -type f -name "*.itb" | wc -l)" -gt 0
+  mv "$temporary" "$archive"
+  trap - EXIT
+'
 step 'Print compiler cache statistics' bash -o pipefail -c "ccache -s | tee \"$output/ccache.log\""
-log "OUTPUT firmware and logs: $output"
+log "OUTPUT logs: $output"
+log "OUTPUT firmware: $target_root/$build_id"
