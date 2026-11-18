@@ -46,6 +46,10 @@
     {
       "name": "0011-hg5585f-fix-linux-recovery-test-type.patch",
       "sha256": "f4708f8aa667ea59ceb708d36291f413576bbcec38933957aaba1b3eeaf7fe0e"
+    },
+    {
+      "name": "0012-hg5585f-combine-wifi-debug-switches.patch",
+      "sha256": "adb30b8df84720ced61075e2a512cfe1b7fb3674b57010d902c617c2df438731"
     }
   ],
   "files": {
@@ -218,7 +222,7 @@
       "reviewed": true
     },
     "files/usr/sbin/hg5585f-wifi-diag": {
-      "sha256": "926966e6155d664aefe3a092a01b952e2b2eae20cce0b810b6093afaa56e4268",
+      "sha256": "c8b73456c0485866196a33206a07e30ed976a5db0b9f7ca281bdc33cec04f499",
       "executable": true,
       "reviewed": true
     },
@@ -228,7 +232,7 @@
       "reviewed": true
     },
     "scripts/check-hg5585f-wifi-diagnostics.py": {
-      "sha256": "801590af13774c39fb4f5c44d88de1f19fedf6d9c85de1c7f0f849aa6237c7a5",
+      "sha256": "01edc7df3b9baa28ef01432e75cc722fdab35b6c9f2c235b99cb77f08d63a064",
       "executable": false,
       "reviewed": true
     },
@@ -255,7 +259,7 @@
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
       "executable": false,
-      "sha256": "c3d78fc6f5767569f35db41b47e74b5426512a75bd6269856e892e47b38926df"
+      "sha256": "f5a701623e5ecd24b9fee297e1787ac003b0c09ae66c57b8322cb616b720132d"
     },
     "scripts/tests/test-wed-irq-storm.py": {
       "sha256": "4aae1585621518bd321f30194324f2ba99af6ca60c34b6dc24d75830c6e9882f",

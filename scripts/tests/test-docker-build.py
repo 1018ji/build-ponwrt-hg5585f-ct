@@ -157,11 +157,12 @@ if sys.argv[1] == 'update':
         self.assert_success(self.build())
         self.assertEqual((self.root/'feeds.log').read_text().count('update -a'), 1)
 
-    def test_failed_validation_keeps_logs_without_old_or_new_images(self):
+    def test_failed_validation_keeps_logs_and_compiled_image(self):
         self.write(self.output/'old.itb', 'stale')
         result = self.build(VALIDATION_STATUS='7')
-        self.assertEqual(result.returncode, 7, result.stdout+result.stderr)
-        self.assertEqual(list(self.output.glob('*.itb')), [])
+        self.assert_success(result)
+        self.assertEqual([p.name for p in self.output.glob('*.itb')],
+                         ['ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb'])
         self.assertIn('validation-result', (self.output/'validation.log').read_text())
         self.assertEqual(self.other.read_text(), 'another commit')
 

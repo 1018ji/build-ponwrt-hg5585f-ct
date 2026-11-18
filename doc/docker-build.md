@@ -1,6 +1,6 @@
 # HG5585F 本地 Docker 编译
 
-本地构建使用一个持久 Docker volume 保存源码、工具链、下载包和 ccache。当前仓库只读挂载到 `/recipe`；宿主机输出目录 `run` 保存构建日志和验证通过的 `.itb` 固件。
+本地构建使用一个持久 Docker volume 保存源码、工具链、下载包和 ccache。当前仓库只读挂载到 `/recipe`；宿主机输出目录 `run` 保存构建日志和编译完成的 `.itb` 固件。
 
 工作区结构如下：
 
@@ -39,7 +39,7 @@ bash scripts/build-docker.sh build
 - 在 `/workdir/code/openwrt` 保持固定源码路径；
 - 首次运行 clone 源码，后续只应用新增补丁；
 - 使用宿主机逻辑 CPU 执行 `make -jN`；
-- 在 `run/<当前仓库 commit 的前 12 位>` 中直接保存日志和验证通过的 `.itb`；
+- 在 `run/<当前仓库 commit 的前 12 位>` 中直接保存日志和编译完成的 `.itb`；
 - 同一 commit 重建时先清空该输出目录，其他 commit 的结果保留。
 
 默认只构建 NPU profile 的 sysupgrade ITB：
@@ -84,7 +84,7 @@ run/907d745abcde/
 └── *.itb
 ```
 
-构建开始时清空当前 commit 的输出目录，因此失败时会保留本次日志，固件在编译后验证通过才复制。复制先写入临时目录，成功后再移入输出目录，仅导出 `.itb`。使用未提交修改构建时，仍归入当前 HEAD 的目录，完整 commit ID 会写入 `steps.log`。
+构建开始时清空当前 commit 的输出目录，因此失败时会保留本次日志。固件编译成功后立即复制，后续校验失败不会撤销已经复制的 `.itb`；复制先写入临时目录，成功后再移入输出目录，仅导出 `.itb`。使用未提交修改构建时，仍归入当前 HEAD 的目录，完整 commit ID 会写入 `steps.log`。
 
 ## 增量构建
 

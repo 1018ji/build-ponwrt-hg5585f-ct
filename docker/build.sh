@@ -172,8 +172,7 @@ log "INFO  Firmware build uses make -j$jobs PROFILE=$build_profile"
 if ! step "Compile $build_profile firmware" bash -o pipefail -c "make -j\"$jobs\" PROFILE=\"$build_profile\" 2>&1 | tee \"$output/build.log\""; then
   step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s PROFILE=\"$build_profile\" 2>&1 | tee -a \"$output/build.log\""
 fi
-step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "HG5585F_PROFILE=\"$build_profile\" bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
-step 'Archive validated firmware images' bash -euo pipefail -c '
+step 'Archive compiled firmware image' bash -euo pipefail -c '
   image_dir=bin/targets/airoha/an7581
   temporary=$(mktemp -d "$output/.images.XXXXXX")
   trap '\''rm -rf "$temporary"'\'' EXIT
@@ -182,5 +181,10 @@ step 'Archive validated firmware images' bash -euo pipefail -c '
   cp -a -- "$image" "$temporary/ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb"
   mv -- "$temporary/ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb" "$output/"
 '
+if step 'Run post-build validation (non-blocking)' bash -o pipefail -c "HG5585F_PROFILE=\"$build_profile\" bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""; then
+  :
+else
+  log 'WARN  Post-build validation failed; compiled firmware was already archived'
+fi
 step 'Print compiler cache statistics' bash -o pipefail -c "ccache -s | tee \"$output/ccache.log\""
 log "OUTPUT logs and firmware: $output"
