@@ -86,6 +86,8 @@ rm -rf -- "$output"
 mkdir -p "$output"
 log_file=$output/steps.log
 log "INFO  Build commit=$recipe_commit jobs=$jobs source=$source"
+mkdir -p "$recipe" /workdir/dl /workdir/ccache
+step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
   if previous=$(python3 /recipe/scripts/upgrade-source.py select /workdir/trees); then
     if [ -n "$previous" ]; then
@@ -94,7 +96,6 @@ if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
     fi
   fi
 fi
-mkdir -p "$recipe" /workdir/dl /workdir/ccache
 # Save the previous recipe before the snapshot replaces it.
 if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
   if [ ! -f "$recipe/source.json" ]; then
@@ -103,7 +104,6 @@ if [ -d "$source" ] && [ ! -f "$source/.hg5585f-source.json" ]; then
   fi
   cp "$recipe/source.json" "$source/.hg5585f-source.json"
 fi
-step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 export CCACHE_DIR=/workdir/ccache CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
 export GITHUB_WORKSPACE="$recipe"
 step 'Run workflow path tests' python3 "$recipe/scripts/tests/test-workflow-paths.py"
