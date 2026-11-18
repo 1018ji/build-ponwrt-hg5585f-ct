@@ -1,0 +1,628 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] hg5585f: recover stalled wireless DMA after stopping producers
+
+Fix firmware-recovery ordering and reset stalled WFDMA only after external
+DMA stopped successfully. Keep failed DMA ownership quarantined and make
+status diagnostics safe after reset. Exercise both HIFs and failed stops.
+
+Signed-off-by: PonWrt developers <noreply@localhost>
+---
+diff --git a/package/kernel/mt76/Makefile b/package/kernel/mt76/Makefile
+index 555b690e3c6322f52a88969f5072dd7a0f2d32b4..3b374f1096e17faee11c12ffe43eb8844216e2e0 100644
+--- a/package/kernel/mt76/Makefile
++++ b/package/kernel/mt76/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=mt76
+-PKG_RELEASE:=5
++PKG_RELEASE:=6
+ 
+ PKG_LICENSE:=BSD-3-Clause-Clear
+ PKG_LICENSE_FILES:=
+diff --git a/package/kernel/mt76/patches/130-mt7915-recover-stalled-offload-dma.patch b/package/kernel/mt76/patches/130-mt7915-recover-stalled-offload-dma.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..3d6c48c1f8b198c752d82db4bec20ca9f2257a2e
+--- /dev/null
++++ b/package/kernel/mt76/patches/130-mt7915-recover-stalled-offload-dma.patch
+@@ -0,0 +1,260 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: stop producers before offload recovery and retry WFDMA idle
++
++Quiesce CPU/NAPI before offload DMA and stop the independent NPU producer
++before polling WFDMA. During full recovery only, reset stalled WFDMA logic
++once after WED and NPU/GDMA stopped, then require all busy bits to clear.
++Retain quarantine on every unresolved DMA/provider error. Report separate
++WFDMA/provider errors and keep offload_status entirely in host memory so
++reading diagnostics cannot access an NPU held in reset.
++
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++diff --git a/mt7915/dma.c b/mt7915/dma.c
++--- a/mt7915/dma.c
+++++ b/mt7915/dma.c
++@@ -263,7 +263,8 @@
++ 		/* Stop PPE/WED producers before retiring wireless RX ownership. */
++ 		if (mtk_wed_device_active(wed))
++ 			wed_err = mtk_wed_device_quiesce(wed);
++-		err = mt7915_npu_legacy_quiesce(dev);
+++		err = mt7915_npu_legacy_quiesce(dev,
+++			dev->recovery.hw_full_reset && !wed_err);
++ 		if (err || wed_err)
++ 			dev_err(dev->mt76.dev,
++ 				"hg5585f-wifi: component=mt7915 event=dma_quiesce_failed wed_error=%d npu_error=%d\n",
++diff --git a/mt7915/npu_legacy.c b/mt7915/npu_legacy.c
++--- a/mt7915/npu_legacy.c
+++++ b/mt7915/npu_legacy.c
++@@ -169,18 +169,52 @@
++ 	return mt76_npu_legacy_init(&dev->mt76, pci_resource_start(pdev, 0));
++ }
++ 
++-int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev)
+++static int mt7915_npu_legacy_wfdma_idle(struct mt7915_dev *dev, u32 offset)
+++{
+++	u32 busy = BIT(1) | BIT(3);
+++	int err = 0;
+++
+++	if (!mt76_poll_msec(dev, MT_WFDMA0_GLO_CFG, busy, 0, 100))
+++		err = -ETIMEDOUT;
+++	if (dev->hif2 &&
+++	    !mt76_poll_msec(dev, MT_WFDMA0_GLO_CFG + offset, busy, 0, 100))
+++		err = -ETIMEDOUT;
+++
+++	return err;
+++}
+++
+++static void mt7915_npu_legacy_wfdma_reset(struct mt7915_dev *dev, u32 offset)
+++{
+++	u32 mask = MT_WFDMA0_RST_DMASHDL_ALL_RST | MT_WFDMA0_RST_LOGIC_RST;
+++	int i;
+++
+++	/* The caller has stopped software, WED and the NPU/GDMA provider.
+++	 * Reset only WFDMA logic here; no ring index or buffer is retired.
+++	 */
+++	for (i = 0; i < 1 + !!dev->hif2; i++) {
+++		u32 base = i ? offset : 0;
+++
+++		mt76_clear(dev, MT_WFDMA0_RST + base, mask);
+++		mt76_set(dev, MT_WFDMA0_RST + base, mask);
+++		mt76_clear(dev, MT_WFDMA0_GLO_CFG + base,
+++			   MT_WFDMA0_GLO_CFG_TX_DMA_EN |
+++			   MT_WFDMA0_GLO_CFG_RX_DMA_EN);
+++		mt76_rr(dev, MT_WFDMA0_GLO_CFG + base);
+++	}
+++}
+++
+++int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev, bool reset)
++ {
++ 	struct mt76_dev *mdev = &dev->mt76;
++ 	struct airoha_npu *npu;
++ 	u32 offset = dev->hif2 ? MT_WFDMA0_PCIE1(0) - MT_WFDMA0(0) : 0;
++-	u32 busy = BIT(1) | BIT(3);
++-	int q, err = 0, stop_err;
+++	int q, err, stop_err;
++ 
++ 	if (!mdev->mmio.npu_legacy_rx)
++ 		return 0;
++ 	if (mdev->mmio.npu_quarantined)
++ 		return -EIO;
+++	WRITE_ONCE(dev->npu_legacy_configured, false);
++ 	mt7915_irq_disable(dev, ~0);
++ 	for (q = MT_RXQ_NPU0; q <= MT_RXQ_NPU1; q++)
++ 		WRITE_ONCE(mdev->q_rx[q].stopped, true);
++@@ -190,27 +224,42 @@
++ 	if (dev->hif2)
++ 		mt76_clear(dev, MT_WFDMA0_GLO_CFG + offset,
++ 			   MT_WFDMA0_GLO_CFG_TX_DMA_EN | MT_WFDMA0_GLO_CFG_RX_DMA_EN);
++-	if (!mt76_poll_msec(dev, MT_WFDMA0_GLO_CFG, busy, 0, 100))
++-		err = -ETIMEDOUT;
++-	if (dev->hif2 &&
++-	    !mt76_poll_msec(dev, MT_WFDMA0_GLO_CFG + offset, busy, 0, 100))
++-		err = -ETIMEDOUT;
+++
+++	/* Stop the independent RX producer before waiting for its consumer. */
+++	npu = rcu_dereference_protected(mdev->mmio.npu, 1);
+++	stop_err = npu ? airoha_npu_wlan_legacy_quiesce(npu, mdev->dev) : -ENODEV;
+++	err = mt7915_npu_legacy_wfdma_idle(dev, offset);
+++	if (err) {
+++		dev_warn(mdev->dev,
+++			 "hg5585f-wifi: component=mt7915 event=wfdma_busy primary=%08x secondary=%08x npu_error=%d reset=%u\n",
+++			 mt76_rr(dev, MT_WFDMA0_GLO_CFG),
+++			 dev->hif2 ? mt76_rr(dev, MT_WFDMA0_GLO_CFG + offset) : 0,
+++			 stop_err, reset);
+++		/* Full recovery may reset a stalled WFDMA only after external
+++		 * producers stopped successfully. Always check busy again.
+++		 */
+++		if (reset && !stop_err) {
+++			mt7915_npu_legacy_wfdma_reset(dev, offset);
+++			err = mt7915_npu_legacy_wfdma_idle(dev, offset);
+++			if (!err)
+++				dev_info(mdev->dev,
+++					 "hg5585f-wifi: component=mt7915 event=wfdma_stop_recovered\n");
+++		}
+++	}
++ 	pci_clear_master(to_pci_dev(mdev->dev));
++ 	if (dev->hif2)
++ 		pci_clear_master(to_pci_dev(dev->hif2->dev));
++-	npu = rcu_dereference_protected(mdev->mmio.npu, 1);
++-	stop_err = npu ? airoha_npu_wlan_legacy_quiesce(npu, mdev->dev) : -ENODEV;
++-	if (!err)
++-		err = stop_err;
++-	if (err) {
+++	if (err || stop_err) {
+++		dev_err(mdev->dev,
+++			"hg5585f-wifi: component=mt7915 event=dma_stop_failed wfdma_error=%d npu_error=%d dma_memory=retained\n",
+++			err, stop_err);
++ 		if (npu)
++ 			airoha_npu_wlan_legacy_poison(npu, mdev->dev);
++ 		WRITE_ONCE(dev->npu_legacy_failed, true);
++ 		mdev->mmio.npu_quarantined = true;
++-		dev_err(mdev->dev, "hg5585f-wifi: component=mt7915 event=dma_stop_failed error=%d dma_memory=retained\n", err);
++-	}
++-	dev->npu_legacy_configured = false;
++-	return err;
+++	}
+++
+++	return stop_err ? stop_err : err;
++ }
++ 
++ static int mt7915_npu_legacy_port_type(struct mt7915_dev *dev)
++diff --git a/mt7915/mac.c b/mt7915/mac.c
++--- a/mt7915/mac.c
+++++ b/mt7915/mac.c
++@@ -1336,19 +1336,6 @@
++ 	ext_phy = dev->mt76.phys[MT_BAND1];
++ 	phy2 = ext_phy ? ext_phy->priv : NULL;
++ 
++-	if (mtk_wed_device_active(&mdev->mmio.wed) || mdev->mmio.npu_legacy_rx) {
++-		ret = mt7915_dma_quiesce(dev);
++-		if (ret) {
++-			dev->recovery.wed_failed = true;
++-			set_bit(MT76_RESET, &dev->mphy.state);
++-			if (ext_phy)
++-				set_bit(MT76_RESET, &ext_phy->state);
++-			mt76_worker_disable(&mdev->tx_worker);
++-			return ret;
++-		}
++-	}
++-
++-
++ 	if (dev->hif2) {
++ 		mt76_wr(dev, MT_INT1_MASK_CSR, 0x0);
++ 		mt76_wr(dev, MT_INT1_SOURCE_CSR, ~0);
++@@ -1382,6 +1369,21 @@
++ 			napi_disable(&dev->mt76.napi[i]);
++ 	}
++ 	napi_disable(&dev->mt76.tx_napi);
+++
+++	/* No CPU or NAPI producer may submit work while hardware is stopped.
+++	 * Keep every token/page until all offload engines are proven idle.
+++	 */
+++	if (mtk_wed_device_active(&mdev->mmio.wed) || mdev->mmio.npu_legacy_rx) {
+++		ret = mt7915_dma_quiesce(dev);
+++		if (ret) {
+++			dev->recovery.wed_failed = true;
+++			mt76_for_each_q_rx(mdev, i)
+++				if (mdev->q_rx[i].ndesc)
+++					napi_enable(&mdev->napi[i]);
+++			napi_enable(&mdev->tx_napi);
+++			return ret;
+++		}
+++	}
++ 
++ 	/* token reinit */
++ 	mt76_connac2_tx_token_put(&dev->mt76);
++@@ -1512,7 +1514,7 @@
++ 	}
++ 
++ 	if (dev->recovery.wed_failed) {
++-		dev_err(dev->mt76.dev, "WED could not stop; radio remains stopped\n");
+++		dev_err(dev->mt76.dev, "Offload DMA could not stop; radio remains stopped\n");
++ 		dev->recovery.hw_full_reset = false;
++ 		mutex_unlock(&dev->mt76.mutex);
++ 		return;
++diff --git a/mt7915/mt7915.h b/mt7915/mt7915.h
++--- a/mt7915/mt7915.h
+++++ b/mt7915/mt7915.h
++@@ -677,7 +677,7 @@
++ #ifdef CONFIG_MT76_NPU_LEGACY
++ int mt7915_npu_legacy_init(struct mt7915_dev *dev);
++ int mt7915_npu_legacy_rx_setup(struct mt7915_dev *dev, bool initial);
++-int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev);
+++int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev, bool reset);
++ bool mt7915_npu_legacy_active(struct mt7915_dev *dev);
++ int mt7915_npu_legacy_sta_reset(struct mt7915_dev *dev, unsigned int band,
++ 				 unsigned int wcid);
++@@ -697,7 +697,7 @@
++ 	return 0;
++ }
++ 
++-static inline int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev)
+++static inline int mt7915_npu_legacy_quiesce(struct mt7915_dev *dev, bool reset)
++ {
++ 	return 0;
++ }
++diff --git a/mt7915/debugfs.c b/mt7915/debugfs.c
++--- a/mt7915/debugfs.c
+++++ b/mt7915/debugfs.c
++@@ -1308,7 +1308,6 @@
++ 	struct mt7915_phy *phy = s->private;
++ 	struct mt7915_dev *dev = phy->dev;
++ 	struct mt76_dev *mdev = &dev->mt76;
++-	struct airoha_npu *npu;
++ 	int i;
++ 
++ 	seq_printf(s, "rx_mode: %s\nrx_configured: %u\nrx_ppe_configured: %u\n",
++@@ -1323,22 +1322,21 @@
++ 	seq_printf(s, "last_info_word1: %08x\nlast_vendor_word2: %08x\n",
++ 		   READ_ONCE(mdev->mmio.npu_rx_last_info),
++ 		   READ_ONCE(mdev->mmio.npu_rx_last_vendor));
++-	rcu_read_lock();
++-	npu = rcu_dereference(mdev->mmio.npu);
+++	/* Diagnostics must remain readable after terminal quarantine. Neither
+++	 * a stopped/reset NPU nor a concurrent recovery may be touched here.
+++	 * Head/tail below are host-owned software indices, not MMIO samples.
+++	 */
++ 	seq_printf(s, "ppe_attached: %u\n", !!rcu_access_pointer(mdev->mmio.ppe_dev));
++-	if (npu && mdev->mmio.npu_legacy_rx) {
+++	seq_puts(s, "rx_queue_view: host-software\n");
+++	if (mdev->mmio.npu_legacy_rx) {
++ 		for (i = 0; i < 2; i++) {
++ 			struct mt76_queue *q = &mdev->q_rx[MT_RXQ_NPU0 + i];
++-			u32 reg = airoha_npu_wlan_get_queue_addr(npu, i, false);
++-			u32 producer = 0, consumer = 0;
++-
++-			regmap_read(npu->regmap, reg + 8, &producer);
++-			regmap_read(npu->regmap, reg + 12, &consumer);
++-			seq_printf(s, "rx%d_producer: %u\nrx%d_consumer: %u\nrx%d_stopped: %u\n",
++-				   i, producer, i, consumer, i, q->stopped);
+++
+++			seq_printf(s, "rx%d_host_head: %u\nrx%d_host_tail: %u\nrx%d_stopped: %u\n",
+++				   i, READ_ONCE(q->head), i, READ_ONCE(q->tail),
+++				   i, READ_ONCE(q->stopped));
++ 		}
++ 	}
++-	rcu_read_unlock();
++ 	return 0;
++ }
++ DEFINE_SHOW_ATTRIBUTE(mt7915_offload_status);
+diff --git a/scripts/tests/test-mt7915-dma-recovery.py b/scripts/tests/test-mt7915-dma-recovery.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..dccfa8d8d5d115d6f7ccef6ce3fc6eef133c1684
+--- /dev/null
++++ b/scripts/tests/test-mt7915-dma-recovery.py
+@@ -0,0 +1,310 @@
++#!/usr/bin/env python3
++"""Exercise stalled WFDMA recovery, producer ordering and MMIO-free diagnostics."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    match = re.search(r'^(?:static )?(?:int|void)\s+' + name + r'\([^;]*?\)\n\{', text, re.M)
++    assert match, name
++    brace = text.index('{', match.start())
++    end, depth = brace + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[match.start():end]
++
++
++def execute(cc, source):
++    with tempfile.TemporaryDirectory(prefix='mt7915-dma-recovery-') as directory:
++        path, binary = Path(directory)/'test.c', Path(directory)/'test'
++        path.write_text(source)
++        subprocess.run([cc, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                        '-Wformat=2', '-Wno-unused-parameter', '-fsanitize=address,undefined', str(path),
++                        '-o', str(binary)], check=True)
++        subprocess.run([str(binary)], check=True)
++
++
++PREFIX = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <string.h>
++#include <errno.h>
++#pragma GCC diagnostic ignored "-Wunused-function"
++#pragma GCC diagnostic ignored "-Wunused-variable"
++typedef uint32_t u32;
++typedef uint64_t u64;
++#define BIT(n) (1U << (n))
++#define READ_ONCE(x) (x)
++#define WRITE_ONCE(x,v) ((x)=(v))
++#define MT_RXQ_NPU0 0
++#define MT_RXQ_NPU1 1
++#define MT_WFDMA0_GLO_CFG 0x208
++#define MT_WFDMA0_RST 0x100
++#define MT_WFDMA0_PCIE1(n) (0x1000+(n))
++#define MT_WFDMA0(n) (n)
++#define MT_WFDMA0_GLO_CFG_TX_DMA_EN BIT(0)
++#define MT_WFDMA0_GLO_CFG_RX_DMA_EN BIT(2)
++#define MT_WFDMA0_RST_DMASHDL_ALL_RST BIT(5)
++#define MT_WFDMA0_RST_LOGIC_RST BIT(4)
++#define MT76_RESET 0
++#define MT76_MCU_RESET 1
++#define MT_BAND1 1
++#define MT_INT1_MASK_CSR 0x308
++#define MT_INT1_SOURCE_CSR 0x30c
++#define MT_PCIE_MAC_INT_ENABLE 0x310
++#define MT_PCIE1_MAC_INT_ENABLE 0x314
++#define MT_PCIE1_MAC_INT_ENABLE_MT7916 0x318
++struct mt76_queue { bool stopped; unsigned int head,tail,ndesc; };
++struct pci_dev { bool master; };
++struct napi_struct { bool enabled; };
++struct worker { bool enabled; };
++struct airoha_npu { int unused; };
++struct mtk_wed_device { bool active,dma_quarantined; };
++struct mt76_phy { unsigned long state; };
++struct mt7915_phy { int unused; };
++struct mt7915_hif { struct pci_dev *dev; };
++struct mt76_dev {
++    struct pci_dev *dev;
++    struct { bool npu_legacy_rx,npu_quarantined; struct airoha_npu *npu; void *ppe_dev;
++             struct mtk_wed_device wed; u32 npu_rx_last_info,npu_rx_last_vendor;
++             u64 npu_rx_host_packets,npu_rx_host_errors; } mmio;
++    struct mt76_queue q_rx[2];
++    struct mt76_phy *phys[2];
++    struct worker tx_worker;
++    struct napi_struct napi[2],tx_napi;
++    int mcu;
++};
++struct mt7915_dev {
++    struct mt76_dev mt76;
++    struct mt76_phy mphy;
++    struct mt7915_hif *hif2;
++    bool npu_legacy_failed,npu_legacy_configured,npu_ppe_forwarding;
++    struct {bool hw_full_reset,wed_failed;} recovery;
++};
++static u32 regs[0x2000/4];
++static int provider_error,provider_calls,poisons,polls,resets,barrier_step,diagnostics;
++static bool stuck_after_reset,no_provider;
++static char logbuf[4096];
++static void __attribute__((format(printf,2,3))) log_message(void *dev,const char *fmt,...)
++{ (void)dev;va_list args;va_start(args,fmt);vsnprintf(logbuf,sizeof(logbuf),fmt,args);va_end(args); }
++#define dev_err log_message
++#define dev_warn log_message
++#define dev_info log_message
++#define rcu_dereference_protected(p,c) (p)
++#define rcu_access_pointer(p) (p)
++#define to_pci_dev(p) (p)
++#define mt76_for_each_q_rx(d,i) for((i)=0;(i)<2;(i)++)
++static void mt7915_irq_disable(struct mt7915_dev *d,u32 mask) { (void)d;assert(mask==~0U); }
++static void mt76_npu_disable_irqs(struct mt76_dev *d) { (void)d; }
++static void mt76_clear(struct mt7915_dev *d,u32 reg,u32 mask)
++{ (void)d;assert(reg<sizeof(regs));regs[reg/4]&=~mask; }
++static void mt76_set(struct mt7915_dev *d,u32 reg,u32 mask)
++{
++    (void)d;assert(reg<sizeof(regs));regs[reg/4]|=mask;
++    if(reg==MT_WFDMA0_RST||reg==MT_WFDMA0_RST+0x1000) {
++        assert(provider_calls&&!provider_error);resets++;
++        if(!stuck_after_reset)regs[(reg-MT_WFDMA0_RST+MT_WFDMA0_GLO_CFG)/4]&=~(BIT(1)|BIT(3));
++    }
++}
++static u32 mt76_rr(struct mt7915_dev *d,u32 reg) { (void)d;assert(reg<sizeof(regs));return regs[reg/4]; }
++static bool mt76_poll_msec(struct mt7915_dev *d,u32 reg,u32 mask,u32 val,unsigned int ms)
++{ (void)d;assert(provider_calls);assert(ms==100);polls++;return (regs[reg/4]&mask)==val; }
++static int airoha_npu_wlan_legacy_quiesce(struct airoha_npu *n,struct pci_dev *d)
++{ assert(n&&!d->master==false);provider_calls++;return provider_error; }
++static void airoha_npu_wlan_legacy_poison(struct airoha_npu *n,struct pci_dev *d)
++{ (void)n;(void)d;poisons++; }
++static void pci_clear_master(struct pci_dev *p) { p->master=false; }
++static void setup(struct mt7915_dev *d,bool dual)
++{
++    static struct pci_dev pci,hifpci;static struct airoha_npu npu;static struct mt7915_hif hif;
++    memset(d,0,sizeof(*d));memset(regs,0,sizeof(regs));memset(logbuf,0,sizeof(logbuf));
++    pci.master=hifpci.master=true;hif.dev=&hifpci;d->mt76.dev=&pci;d->hif2=dual?&hif:NULL;
++    d->mt76.mmio.npu=&npu;d->mt76.mmio.npu_legacy_rx=true;d->npu_legacy_configured=true;
++    provider_error=provider_calls=poisons=polls=resets=barrier_step=diagnostics=0;
++    stuck_after_reset=no_provider=false;
++    for(int i=0;i<2;i++) {d->mt76.napi[i].enabled=true;d->mt76.q_rx[i].ndesc=256;}
++    d->mt76.tx_worker.enabled=d->mt76.tx_napi.enabled=true;
++}
++'''
++
++
++QUIESCE_TESTS = r'''
++int main(void)
++{
++    struct mt7915_dev d;
++    for(int dual=0;dual<2;dual++) {
++        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(0)|BIT(2);
++        assert(!mt7915_npu_legacy_quiesce(&d,true));
++        assert(!resets&&provider_calls==1&&!d.npu_legacy_configured&&!d.mt76.dev->master);
++        assert(!d.mt76.mmio.npu_quarantined&&d.mt76.q_rx[0].stopped&&d.mt76.q_rx[1].stopped);
++        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(0)|BIT(1)|BIT(2)|BIT(3);
++        if(dual)regs[(MT_WFDMA0_GLO_CFG+0x1000)/4]=BIT(0)|BIT(1)|BIT(2)|BIT(3);
++        assert(!mt7915_npu_legacy_quiesce(&d,true));
++        assert(resets==1+dual&&polls==2*(1+dual)&&!poisons&&!d.mt76.mmio.npu_quarantined);
++        assert(!(regs[MT_WFDMA0_GLO_CFG/4]&(BIT(0)|BIT(1)|BIT(2)|BIT(3))));
++        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);stuck_after_reset=true;
++        assert(mt7915_npu_legacy_quiesce(&d,true)==-ETIMEDOUT);
++        assert(d.mt76.mmio.npu_quarantined&&d.npu_legacy_failed&&poisons==1);
++        char expected[80];snprintf(expected,sizeof(expected),"wfdma_error=%d npu_error=0",-ETIMEDOUT);
++        assert(strstr(logbuf,expected));
++        int before=resets;assert(mt7915_npu_legacy_quiesce(&d,true)==-EIO&&resets==before);
++        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);provider_error=-ETIMEDOUT;
++        assert(mt7915_npu_legacy_quiesce(&d,true)==-ETIMEDOUT);
++        snprintf(expected,sizeof(expected),"npu_error=%d",-ETIMEDOUT);
++        assert(!resets&&d.mt76.mmio.npu_quarantined&&strstr(logbuf,expected));
++        setup(&d,dual);provider_error=-EIO;
++        assert(mt7915_npu_legacy_quiesce(&d,true)==-EIO&&!resets&&poisons);
++        setup(&d,dual);regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);
++        assert(mt7915_npu_legacy_quiesce(&d,false)==-ETIMEDOUT&&!resets&&poisons);
++    }
++    setup(&d,false);d.mt76.mmio.npu=NULL;
++    assert(mt7915_npu_legacy_quiesce(&d,true)==-ENODEV&&!resets&&!poisons);
++    puts("PASS: single/dual HIF stalled WFDMA resets once only after external DMA stop; residual busy/provider failures quarantine; cleanup never resets");
++}
++'''
++
++
++def quiesce_test(source, cc):
++    # Missing provider must still permit polling but not a reset.
++    prefix = PREFIX.replace('assert(provider_calls);assert(ms==100);',
++                            'assert(provider_calls||!d->mt76.mmio.npu);assert(ms==100);')
++    prefix = prefix.replace('assert(n&&!d->master==false);', 'assert(n&&d->master);')
++    body = '\n'.join(function(source, n) for n in (
++        'mt7915_npu_legacy_wfdma_idle', 'mt7915_npu_legacy_wfdma_reset',
++        'mt7915_npu_legacy_quiesce'))
++    execute(cc, prefix + body + QUIESCE_TESTS)
++
++
++EXTERNAL_STUBS = r'''
++#define CONFIG_NET_AIROHA_WED 1
++static int wed_error;
++static bool mtk_wed_device_active(struct mtk_wed_device *wed) { return wed->active; }
++static int mtk_wed_device_quiesce(struct mtk_wed_device *wed) { (void)wed;return wed_error; }
++'''
++EXTERNAL_TESTS = r'''
++int main(void)
++{
++    struct mt7915_dev d;
++    for(int full=0;full<2;full++)for(int failed=0;failed<2;failed++) {
++        setup(&d,false);d.recovery.hw_full_reset=full;d.mt76.mmio.wed.active=true;
++        regs[MT_WFDMA0_GLO_CFG/4]=BIT(1);wed_error=failed?-EIO:0;
++        int ret=mt7915_dma_quiesce(&d);
++        assert(resets==(full&&!failed));
++        assert((ret==0)==(full&&!failed));
++        if(ret)assert(d.mt76.mmio.wed.dma_quarantined&&d.mt76.mmio.npu_quarantined);
++    }
++    puts("PASS: actual DMA dispatcher permits fallback only for full reset with successful WED stop");
++}
++'''
++
++
++def external_test(driver, cc):
++    prefix = PREFIX.replace('assert(provider_calls);assert(ms==100);',
++                            'assert(provider_calls||!d->mt76.mmio.npu);assert(ms==100);')
++    prefix = prefix.replace('assert(n&&!d->master==false);', 'assert(n&&d->master);')
++    source = (driver/'npu_legacy.c').read_text()
++    body = '\n'.join(function(source, n) for n in (
++        'mt7915_npu_legacy_wfdma_idle', 'mt7915_npu_legacy_wfdma_reset',
++        'mt7915_npu_legacy_quiesce'))
++    dispatcher = function((driver/'dma.c').read_text(), 'mt7915_dma_quiesce')
++    dispatcher = dispatcher.split('\tif (!mtk_wed_device_active(wed))', 1)[0] + '\treturn 0;\n}\n'
++    execute(cc, prefix + body + EXTERNAL_STUBS + dispatcher + EXTERNAL_TESTS)
++
++
++ORDER_STUBS = r'''
++static int quiesce_error,retired_tokens;
++static bool mtk_wed_device_active(void *w) { (void)w;return true; }
++static bool dev_is_pci(void *p) { (void)p;return true; }
++static bool is_mt7915(struct mt76_dev *d) { (void)d;return false; }
++static void mt76_wr(struct mt7915_dev *d,u32 r,u32 v) { (void)d;(void)r;(void)v; }
++static void set_bit(int b,unsigned long *v) { *v|=1UL<<b; }
++static void wake_up(void *p) { (void)p; }
++static void mt76_txq_schedule_all(struct mt76_phy *p) { assert(p->state&BIT(MT76_RESET)); }
++static void mt76_worker_disable(struct worker *w) { assert(w->enabled);w->enabled=false; }
++static void napi_disable(struct napi_struct *n) { assert(n->enabled);n->enabled=false; }
++static void napi_enable(struct napi_struct *n) { assert(!n->enabled);n->enabled=true; }
++static int mt7915_dma_quiesce(struct mt7915_dev *d)
++{
++    assert(!d->mt76.tx_worker.enabled&&!d->mt76.tx_napi.enabled);
++    assert(!d->mt76.napi[0].enabled&&!d->mt76.napi[1].enabled);
++    assert(d->mphy.state&BIT(MT76_RESET));assert(!retired_tokens);
++    return quiesce_error;
++}
++'''
++ORDER_TESTS = r'''
++int main(void)
++{
++    struct mt7915_dev d;setup(&d,false);quiesce_error=-ETIMEDOUT;retired_tokens=0;
++    assert(mt7915_mac_restart(&d)==-ETIMEDOUT&&!retired_tokens);
++    assert(d.recovery.wed_failed&&!d.mt76.tx_worker.enabled);
++    assert(d.mt76.napi[0].enabled&&d.mt76.napi[1].enabled&&d.mt76.tx_napi.enabled);
++    setup(&d,false);quiesce_error=0;retired_tokens=0;
++    assert(!mt7915_mac_restart(&d)&&retired_tokens==1&&!d.recovery.wed_failed);
++    puts("PASS: actual full-reset prefix stops software before quiesce; failed stop retains tokens and balances NAPI");
++}
++'''
++
++
++def order_test(source, cc):
++    body = function(source, 'mt7915_mac_restart')
++    # Stop at the first memory-retirement point; hardware/firmware reboot is
++    # covered by compilation and a subsequent device test, not faked here.
++    body = body.split('\t/* token reinit */', 1)[0] + '\tretired_tokens++;\n\t(void)run_main; (void)run_ext; (void)phy2;\n\treturn 0;\n}\n'
++    prefix = PREFIX.replace('struct mt76_phy { unsigned long state; };',
++                            'struct mt76_phy { unsigned long state; void *priv; };')
++    prefix = prefix.replace('int mcu;', 'struct {int wait;} mcu;')
++    execute(cc, prefix + ORDER_STUBS + body + ORDER_TESTS)
++
++
++STATUS_STUBS = r'''
++struct seq_file { void *private;char output[4096]; };
++struct mt7915_phy { struct mt7915_dev *dev; };
++#define atomic64_read(p) (*(p))
++static void __attribute__((format(printf,2,3))) seq_printf(struct seq_file *s,const char *fmt,...)
++{ va_list args;va_start(args,fmt);vsnprintf(s->output+strlen(s->output),sizeof(s->output)-strlen(s->output),fmt,args);va_end(args); }
++static void seq_puts(struct seq_file *s,const char *text) { seq_printf(s,"%s",text); }
++'''
++STATUS_TESTS = r'''
++int main(void)
++{
++    struct mt7915_dev d;struct mt7915_phy phy={.dev=&d};struct seq_file s={.private=&phy};
++    for(int state=0;state<3;state++) {
++        setup(&d,false);memset(s.output,0,sizeof(s.output));
++        d.npu_legacy_configured=state==0;d.npu_legacy_failed=state==2;d.mt76.mmio.npu_quarantined=state==2;
++        d.mt76.q_rx[0].head=17;d.mt76.q_rx[0].tail=12;d.mt76.q_rx[0].stopped=state!=0;
++        assert(!mt7915_offload_status_show(&s,NULL));
++        assert(strstr(s.output,"rx_queue_view: host-software"));
++        assert(strstr(s.output,"rx0_host_head: 17\nrx0_host_tail: 12"));
++    }
++    puts("PASS: live, recovering and quarantined status reads work with no NPU MMIO API present");
++}
++'''
++
++
++def status_test(source, cc):
++    prefix = PREFIX.replace('struct mt7915_phy { int unused; };', '')
++    execute(cc, prefix + STATUS_STUBS + function(source, 'mt7915_offload_status_show') + STATUS_TESTS)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76', type=Path, required=True)
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    driver = args.mt76/'mt7915'
++    quiesce_test((driver/'npu_legacy.c').read_text(), args.cc)
++    external_test(driver, args.cc)
++    order_test((driver/'mac.c').read_text(), args.cc)
++    status_test((driver/'debugfs.c').read_text(), args.cc)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+index 7b7fc0ce6a291fd5d89ec3b46b9bfe8ce41ab99e..cc425d96764d3137208a1ff11514c068a7b8d726 100644
+--- a/scripts/tests/test-workflow-paths.py
++++ b/scripts/tests/test-workflow-paths.py
+@@ -116,6 +116,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
+         self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)
+         self.write(Path('recipe/scripts/tests/test-wed-txp-template.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-mt7915-dma-recovery.py'), stub)
+         self.write(Path('scripts/validate-build.sh'), full_validation())
+ 
+     def write(self, path, contents=''):
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+index ce397c2113c9a6226c421b2f7e7df7f601fd127c..94cb70604cfc86345531bdb63f7a25397797c731 100644
+--- a/scripts/validate-build.sh
++++ b/scripts/validate-build.sh
+@@ -51,6 +51,7 @@ for kernel_config in "${kernel_configs[@]}"; do
+     python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
+     python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
+     python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-txp-template.py" --mt76 "$mt76"
++    python3 "$GITHUB_WORKSPACE/scripts/tests/test-mt7915-dma-recovery.py" --mt76 "$mt76"
+     mt76_found=$((mt76_found + 1))
+   done
+   [ "$mt76_found" -gt 0 ] || {

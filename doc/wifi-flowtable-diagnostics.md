@@ -30,7 +30,7 @@
 ## 编译和测试
 
 ```sh
-HG5585F_JOBS=6 bash scripts/build-docker.sh --reuse build
+bash scripts/build-docker.sh
 ```
 
 新增内核补丁需要更新完整内核及匹配模块。现有设备仅修改 nft 表，无法获得新内核的 WED 多 block 修复或诊断接口。
@@ -92,3 +92,25 @@ hg5585f-wifi-offload-check 60
 当前两种错误共用一处日志限流，`callbacks suppressed` 表示被抑制的日志调用数量，不能换算成丢包数量，也不能由显示的一条 `0x40000` 认定它只发生一次。下一步先对照原厂 TX-free 初始化，再增加各错误位独立计数及首次异常的有界快照，核对短 ACK 与大包路径、token 范围、回收环索引和 DDONE。现阶段保留日志，暂缓 CPU 优化和关闭日志对照。
 
 CPU 数值是重采样过程中的总占用；同一份记录在未打流窗口也有约 6%–7% 总占用，主要是内核时间。因此上传 10.56%、下载 7.81% 不能全部算作硬件转发自身的开销，也不能作为关闭日志后的性能结论。需在异常定位后用轻量采样重新测量。
+
+
+### 2026-11-18 MCU 超时后的 DMA 恢复修复
+
+此次现场在 MCU `0x5aed`（GET_MIB_INFO）超时前，WA 已对四个 MSDU ID 反复报
+`drop by reaseon ... but failed`。随后 `wed_error=0 npu_error=-110`：WED 停止成功，
+MT7916 WFDMA/NPU 组合停止失败，原有共享错误提示把它写成了 WED 失败。
+
+0010 修复完整恢复时的执行顺序：先置 RESET、停止发送 worker 和 NAPI，再停止
+WED 与 NPU/GDMA，最后检查 WFDMA 是否空闲。只有完整恢复、WED 和 NPU/GDMA
+均停止成功时，才允许对仍忙的 WFDMA 做一次逻辑复位，之后必须重新验证 busy 位。
+任何未解决的 DMA 错误仍保留 buffer/token 所有权并进入隔离。日志分别输出
+`wfdma_error`、`npu_error`，复位后停止成功时输出 `wfdma_stop_recovered`。
+
+`offload_status` 改成完全读取主机内存，故障后不会访问 reset 中的 NPU 寄存器。
+`rx_queue_view: host-software` 下的 `rxN_host_head`、`rxN_host_tail` 是主机队列索引，
+不等同于旧 `rxN_producer`、`rxN_consumer` 的硬件读数；两者不能直接比较。
+
+已执行单/双 HIF 故障注入、WED/NPU 停止失败、复位后仍忙、NAPI 配对及状态读取验证，
+并用现有 OpenWrt GCC/内核/backports 配置交叉编译四个修改对象。
+这些验证覆盖恢复代码，尚未证明修复了 WA 首次异常；仍需刷入后压测并确认恢复成功、
+终端重新关联与业务恢复。旧固件已经 terminal quarantine 时需要整机重启。

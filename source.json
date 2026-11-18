@@ -38,6 +38,10 @@
     {
       "name": "0009-hg5585f-wed-stop-recovery.patch",
       "sha256": "be6f64f74eee50e858528f973b6aa6a839bf5bf83af552f1b4fbe0755092d07b"
+    },
+    {
+      "name": "0010-hg5585f-wifi-dma-recovery.patch",
+      "sha256": "7a53856487efd325b3a2af25c7fd5719e1a72b37efdda6b7a7f1b1c10fe992a9"
     }
   ],
   "files": {
@@ -128,7 +132,7 @@
       "executable": false
     },
     "package/kernel/mt76/Makefile": {
-      "sha256": "edbaf63dd871ce925bf57425d30a44172d8c808ad743623564863b0646bb86f7",
+      "sha256": "592d182f87f9f5a30ce75b37f4a00ea7fb566eb8eff9ab7c4275bda1bba189cd",
       "executable": false,
       "reviewed": true
     },
@@ -238,11 +242,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "8a57379a629dac1daec2388d7c11e068fe568b76e4959f82dfbbe9611399e1e8",
+      "sha256": "53e7a138801c4eb1ce2f352bc3f4574f610a60bb81d7fc4013c887f69ceafbf1",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "cfdc90e203e822f01d30e30f82d9cf60d7369337ae28cbc1872885c562de5e4a",
+      "sha256": "cdbbf71196c7d367ac7f01c31d9dadd0d5a98da217a186f382d6684cf914c38f",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {
@@ -384,6 +388,14 @@
     "scripts/tests/test-wed-stop.py": {
       "executable": false,
       "sha256": "ca5ee5fc72fd17655aae3d597021a82fb7240e6600fe753aac9aa2fbbbfc3828"
+    },
+    "package/kernel/mt76/patches/130-mt7915-recover-stalled-offload-dma.patch": {
+      "sha256": "34ce38a7dadfaa7cae711e17bfdcef5c20b8ea864a95100217b4daf012f1c0f2",
+      "executable": false
+    },
+    "scripts/tests/test-mt7915-dma-recovery.py": {
+      "sha256": "ae6bfd90429bc7ad5822488ceecfd10c6f90b7b7d90a7f484ecfb566a2b60868",
+      "executable": false
     }
   },
   "feeds": {
