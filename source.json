@@ -54,6 +54,10 @@
     {
       "name": "0013-hg5585f-disable-wed-diagnostic-hotpath.patch",
       "sha256": "8fc805555e9182caef77594969782a9f0f7fd741a6268d193693680408a0f7de"
+    },
+    {
+      "name": "0014-hg5585f-stub-wed-diagnostic-switch-test.patch",
+      "sha256": "3455985b2501e06a80c01da7346f4915419b9ee817508f9e7d38d86434bfcba2"
     }
   ],
   "files": {
@@ -266,7 +270,7 @@
       "sha256": "f5a701623e5ecd24b9fee297e1787ac003b0c09ae66c57b8322cb616b720132d"
     },
     "scripts/tests/test-wed-irq-storm.py": {
-      "sha256": "4aae1585621518bd321f30194324f2ba99af6ca60c34b6dc24d75830c6e9882f",
+      "sha256": "46d1af13f7f8dcf4780525fc2cf9ebf935018255b8c3aff40d4848eb3f63d6be",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/941-net-airoha-mask-wed-extended-interrupts.patch": {

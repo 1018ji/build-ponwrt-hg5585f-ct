@@ -95,6 +95,7 @@ static void note(const char *format,...) { (void)format;errors++; }
 #define dev_err(dev,...) do { (void)(dev);note(__VA_ARGS__); } while(0)
 #define dev_warn_ratelimited(dev,...) do { (void)(dev);exceptions++; } while(0)
 #define airoha_wlan_dbg(dev,...) do { (void)(dev); } while(0)
+static bool airoha_wlan_debug_enabled(void) { return false; }
 static u32 airoha_wed_read(struct mtk_wed_device *w,u32 off)
 { return w->priv->regs[off/4]; }
 static void airoha_wed_write(struct mtk_wed_device *w,u32 off,u32 value)
