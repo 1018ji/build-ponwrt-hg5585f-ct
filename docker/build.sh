@@ -167,8 +167,8 @@ step 'Resolve final OpenWrt configuration' make defconfig
 step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
 step 'Download package sources' bash -o pipefail -c "DOWNLOAD_MIRROR=\"$download_mirror\" make download -j\"$jobs\" 2>&1 | tee \"$output/download.log\""
 log "INFO  Firmware build uses make -j$jobs PROFILE=$build_profile"
-if ! step "Compile $build_profile firmware" bash -o pipefail -c "make -j\"$jobs\" image PROFILE=\"$build_profile\" 2>&1 | tee \"$output/build.log\""; then
-  step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s image PROFILE=\"$build_profile\" 2>&1 | tee -a \"$output/build.log\""
+if ! step "Compile $build_profile firmware" bash -o pipefail -c "make -j\"$jobs\" PROFILE=\"$build_profile\" 2>&1 | tee \"$output/build.log\""; then
+  step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s PROFILE=\"$build_profile\" 2>&1 | tee -a \"$output/build.log\""
 fi
 step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "HG5585F_PROFILE=\"$build_profile\" bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
 step 'Archive validated firmware images' bash -euo pipefail -c '
