@@ -30,6 +30,10 @@
     {
       "name": "0007-hg5585f-wed-diagnostics.patch",
       "sha256": "5ed1f71706554e6d616209139d3f1a682c463595158a4193b25a2c8a5e73cdd6"
+    },
+    {
+      "name": "0008-hg5585f-single-npu-profile.patch",
+      "sha256": "ef52c830065b3ee51ab7f0f661eb3f0d6595389a68a5cdaa50c1562b71a0b637"
     }
   ],
   "files": {
