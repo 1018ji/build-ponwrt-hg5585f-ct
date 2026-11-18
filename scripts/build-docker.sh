@@ -37,6 +37,7 @@ Usage: bash scripts/build-docker.sh [build|shell|check]
 Build HG5585F firmware in Ubuntu 22.04 using one persistent Docker volume.
 HG5585F_RUN_DIR defaults to the run directory beside this repository.
 HG5585F_JOBS defaults to the host logical CPU count and is passed to make -j.
+HG5585F_PROFILE defaults to fiberhome_hg5585f-ct-npu and is the only image built.
 HG5585F_DOWNLOAD_MIRROR defaults to ImmortalWrt and OpenWrt CDN source mirrors.
 The source tree, downloads, toolchain and ccache are reused automatically.
 Logs and validated .itb files go directly into run/<recipe commit short ID>.

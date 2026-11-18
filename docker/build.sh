@@ -70,6 +70,11 @@ esac
 
 jobs=${HG5585F_JOBS:-$(nproc)}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'HG5585F_JOBS must be a positive integer' >&2; exit 2; }
+build_profile=${HG5585F_PROFILE:-fiberhome_hg5585f-ct-npu}
+[[ "$build_profile" == fiberhome_hg5585f-ct-npu ]] || {
+  echo 'HG5585F_PROFILE must be fiberhome_hg5585f-ct-npu' >&2
+  exit 2
+}
 download_mirror=${HG5585F_DOWNLOAD_MIRROR:-https://mirror.immortalwrt.org/sources\;https://sources.cdn.openwrt.org}
 recipe_commit=${HG5585F_RECIPE_COMMIT:-$(git -c safe.directory=/recipe -C /recipe rev-parse --verify HEAD)}
 [[ "$recipe_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected a full recipe Git commit ID' >&2; exit 2; }
@@ -85,7 +90,7 @@ export build_root recipe source output
 rm -rf -- "$output"
 mkdir -p "$output"
 log_file=$output/steps.log
-log "INFO  Build commit=$recipe_commit jobs=$jobs source=$source"
+log "INFO  Build commit=$recipe_commit profile=$build_profile jobs=$jobs source=$source"
 mkdir -p "$recipe" /workdir/dl /workdir/ccache
 step 'Snapshot build recipe into persistent Linux volume' rsync -a --delete --exclude '.git' --exclude 'openwrt' --exclude 'output' /recipe/ "$recipe/"
 if [ ! -e "$build_root" ] && [ -d /workdir/trees ]; then
@@ -161,20 +166,19 @@ step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/f
 step 'Resolve final OpenWrt configuration' make defconfig
 step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
 step 'Download package sources' bash -o pipefail -c "DOWNLOAD_MIRROR=\"$download_mirror\" make download -j\"$jobs\" 2>&1 | tee \"$output/download.log\""
-log "INFO  Firmware build uses make -j$jobs"
-if ! step 'Compile native, WED and NPU firmware' bash -o pipefail -c "make -j\"$jobs\" 2>&1 | tee \"$output/build.log\""; then
-  step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s 2>&1 | tee -a \"$output/build.log\""
+log "INFO  Firmware build uses make -j$jobs PROFILE=$build_profile"
+if ! step "Compile $build_profile firmware" bash -o pipefail -c "make -j\"$jobs\" image PROFILE=\"$build_profile\" 2>&1 | tee \"$output/build.log\""; then
+  step 'Retry firmware build serially with verbose output' bash -o pipefail -c "make -j1 V=s image PROFILE=\"$build_profile\" 2>&1 | tee -a \"$output/build.log\""
 fi
-step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
+step 'Validate built kernel, firmware profiles and ABI' bash -o pipefail -c "HG5585F_PROFILE=\"$build_profile\" bash \"$recipe/scripts/validate-build.sh\" 2>&1 | tee \"$output/validation.log\""
 step 'Archive validated firmware images' bash -euo pipefail -c '
   image_dir=bin/targets/airoha/an7581
   temporary=$(mktemp -d "$output/.images.XXXXXX")
   trap '\''rm -rf "$temporary"'\'' EXIT
-  shopt -s nullglob
-  images=("$image_dir"/*.itb)
-  test "${#images[@]}" -gt 0
-  cp -a -- "${images[@]}" "$temporary/"
-  mv -- "$temporary/"*.itb "$output/"
+  image="$image_dir/ponwrt-airoha-an7581-fiberhome_hg5585f-ct-npu-squashfs-sysupgrade.itb"
+  test -f "$image"
+  cp -a -- "$image" "$temporary/ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb"
+  mv -- "$temporary/ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb" "$output/"
 '
 step 'Print compiler cache statistics' bash -o pipefail -c "ccache -s | tee \"$output/ccache.log\""
 log "OUTPUT logs and firmware: $output"

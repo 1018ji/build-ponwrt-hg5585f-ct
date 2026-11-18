@@ -150,6 +150,14 @@ static void masking_tests(void)
     struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
     initialize(&aw,&wed,&ppe);
     u32 error=MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
+    u32 benign=BIT(1);
+    airoha_wed_irq_mask(&wed,0x20);
+    aw.regs[MTK_WED_EXT_INT_STATUS/4]=benign;
+    assert(!asserted(&aw));
+    assert(!airoha_wed_irq_get(&wed,0x20));
+    assert(aw.regs[MTK_WED_EXT_INT_STATUS/4]==benign);
+    assert(aw.irq_count.v==0 && exceptions==0);
+
     airoha_wed_irq_mask(&wed,0x20);aw.regs[MTK_WED_EXT_INT_STATUS/4]=error;
     assert(error==0x80000 && asserted(&aw));
     airoha_wed_irq_mask(&wed,0);assert(!asserted(&aw));

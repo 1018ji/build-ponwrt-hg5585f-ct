@@ -65,7 +65,8 @@ if sys.argv[1] == 'update':
 """)
         self.write(self.seed/'feeds/pon_userspace/luci-app-pon/Makefile', 'fixture\n')
         images = self.seed/'bin/targets/airoha/an7581'
-        for name in ('recovery image.itb', 'sysupgrade.itb', 'sysupgrade.bin',
+        for name in ('ponwrt-airoha-an7581-fiberhome_hg5585f-ct-npu-squashfs-sysupgrade.itb',
+                     'recovery image.itb', 'sysupgrade.itb', 'sysupgrade.bin',
                      'sha256sums', 'packages/unrelated.itb'):
             self.write(images/name, name)
         self.source = self.work/'code/openwrt'
@@ -119,7 +120,7 @@ if sys.argv[1] == 'update':
         self.assert_success(self.build())
         self.assertEqual({p.name for p in self.output.iterdir()},
                          {'steps.log', 'download.log', 'build.log', 'validation.log',
-                          'ccache.log', 'recovery image.itb', 'sysupgrade.itb'})
+                          'ccache.log', 'ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb'})
         self.assertEqual(self.other.read_text(), 'another commit')
         self.assertEqual(self.cache.read_text(), 'keep cached object')
         self.assertIn(self.commit, (self.output/'steps.log').read_text())

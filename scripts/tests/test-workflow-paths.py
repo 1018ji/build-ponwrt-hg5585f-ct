@@ -16,7 +16,7 @@ WORKFLOW = RECIPE/'.github/workflows/hg5585f-ct-builder.yml'
 
 def source_validation():
     text = (RECIPE/'scripts/validate-build.sh').read_text()
-    return text.split('\nfor profile in native wed npu;', 1)[0]
+    return text.split('\nprofiles=(native wed npu)', 1)[0]
 
 
 def full_validation():

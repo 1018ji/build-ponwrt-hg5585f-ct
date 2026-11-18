@@ -230,11 +230,11 @@
       "executable": false
     },
     "scripts/tests/test-workflow-paths.py": {
-      "sha256": "e6a8e6941ed2db41130a662c0d3a996cc543dc7f32522ef16155d6e252cb9a6e",
+      "sha256": "e83ece734c60fd6b368e29edd25f8cd25613b7ce05034b4ee63e0a48a2d409a9",
       "executable": false
     },
     "scripts/validate-build.sh": {
-      "sha256": "b0410599b939711c5ea5aa809b0e905715e39e216afe59ef9c5bd01e2d7497ac",
+      "sha256": "10d8aa5029ab762f8b50858972ba053d975a74d61c9608429764532cfa52ce55",
       "executable": false
     },
     "target/linux/airoha/patches-6.18/940-net-airoha-trace-wed-attach-and-stop-irq-storm.patch": {

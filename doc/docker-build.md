@@ -42,11 +42,19 @@ bash scripts/build-docker.sh build
 - 在 `run/<当前仓库 commit 的前 12 位>` 中直接保存日志和验证通过的 `.itb`；
 - 同一 commit 重建时先清空该输出目录，其他 commit 的结果保留。
 
+默认只构建 NPU profile 的 sysupgrade ITB：
+
+```text
+ponwrt-airoha-an7581-fiberhome_hg5585f-squashfs-sysupgrade.itb
+```
+
 指定并发任务数：
 
 ```bash
 HG5585F_JOBS=6 bash scripts/build-docker.sh build
 ```
+
+`HG5585F_PROFILE` 默认为 `fiberhome_hg5585f-ct-npu`；其他 profile 不编译、不验证、不导出。
 
 下载默认优先使用 ImmortalWrt 和 OpenWrt CDN 镜像，失败后继续使用 OpenWrt 自带的其他镜像和原始地址。需要指定自己的镜像列表时设置 `HG5585F_DOWNLOAD_MIRROR`，多个地址用分号分隔：
 

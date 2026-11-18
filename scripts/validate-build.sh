@@ -58,7 +58,11 @@ for kernel_config in "${kernel_configs[@]}"; do
     exit 1
   }
 done
-for profile in native wed npu; do
+profiles=(native wed npu)
+if [ "${HG5585F_PROFILE:-all}" = fiberhome_hg5585f-ct-npu ]; then
+  profiles=(npu)
+fi
+for profile in "${profiles[@]}"; do
   case "$profile" in
     native) pattern='*fiberhome_hg5585f-ct-*'; flag= ;;
     wed) pattern='*fiberhome_hg5585f-ct-wed-*'; flag=--wed ;;
