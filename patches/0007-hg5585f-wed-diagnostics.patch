@@ -1,5 +1,6 @@
 diff --git a/package/kernel/mt76/patches/128-mt7915-record-airoha-txfree-diagnostics.patch b/package/kernel/mt76/patches/128-mt7915-record-airoha-txfree-diagnostics.patch
 new file mode 100644
+index 0000000..5d81bf3
 --- /dev/null
 +++ b/package/kernel/mt76/patches/128-mt7915-record-airoha-txfree-diagnostics.patch
 @@ -0,0 +1,64 @@
@@ -68,21 +69,24 @@ new file mode 100644
 + 	case MT76_WED_Q_RX:
 + 		ret = mtk_wed_device_rx_ring_setup(q->wed, ring, q->regs,
 diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
+index f16597e..8c2ab06 100644
 --- a/scripts/check-hg5585f-offload.py
 +++ b/scripts/check-hg5585f-offload.py
-@@ -24,6 +24,7 @@
+@@ -24,6 +24,8 @@ patches = [root / 'target/linux/airoha/patches-6.18' / name for name in (
      '947-net-airoha-wed-allow-multiple-flow-blocks.patch',
      '948-netfilter-flowtable-use-wifi-bridge-endpoint.patch',
      '949-net-airoha-classify-wed-irqs-and-drain-faults.patch',
 +    '950-net-airoha-record-wed-first-error-and-txfree.patch',
++    '951-net-airoha-mask-benign-tkid-without-payload.patch',
  )]
  patches += sorted((root / 'package/kernel/mt76/patches').glob('*.patch'))
  for patch in patches:
 diff --git a/scripts/tests/test-wed-exceptions.py b/scripts/tests/test-wed-exceptions.py
 new file mode 100644
+index 0000000..e6a228e
 --- /dev/null
 +++ b/scripts/tests/test-wed-exceptions.py
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,209 @@
 +#!/usr/bin/env python3
 +"""Execute bounded WED diagnostic decoding and first-error capture in C."""
 +import argparse
@@ -180,8 +184,12 @@ new file mode 100644
 +    }
 +    memset(data,0,sizeof(data));put16(data+2,100);put32(data+4,4U<<16);
 +    airoha_wed_diag_decode(&r,data,sizeof(data),false,0,4096,4096,4096);
-+    assert(r.truncated && !r.malformed && r.raw_words==32 && r.decoded==60);
-+    assert(r.saved_tokens==16);
++    assert(!r.truncated && !r.malformed && r.raw_words==256 && r.decoded==100);
++    assert(r.saved_tokens==100);
++    memset(data,0,sizeof(data));put16(data+2,256);put32(data+4,4U<<16);
++    airoha_wed_diag_decode(&r,data,sizeof(data),false,0,4096,4096,4096);
++    assert(!r.truncated && !r.malformed && r.decoded==256 && r.saved_tokens==256);
++    assert(r.token[255]==0);
 +    airoha_wed_diag_decode(&r,data,12,false,0,4096,4096,4096);
 +    assert(r.malformed && !r.truncated);
 +    memset(data,0,sizeof(data));put16(data+2,1);put32(data+4,4U<<16);
@@ -232,6 +240,7 @@ new file mode 100644
 +    assert(diag->state.count[18]==1 && diag->state.first[1].valid && diag->state.first[1].ns>stamp);
 +    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
 +    assert(diag->state.first[0].host_after.sequence==2 && diag->state.first[1].host_after.sequence==2);
++    assert(diag->state.first[0].buffers[0].valid && diag->state.first[0].buffers[0].payload_valid);
 +    airoha_wed_diag_txfree(&wed,data,sizeof(data),false,0,4096);
 +    assert(diag->state.first[0].host_after.sequence==2 && diag->state.latest.sequence==3);
 +    /* Invalid geometry and pointers are recorded, never followed. */
@@ -288,9 +297,10 @@ new file mode 100644
 +if __name__ == '__main__':
 +    main()
 diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-storm.py
+index 5643560..723198a 100644
 --- a/scripts/tests/test-wed-irq-storm.py
 +++ b/scripts/tests/test-wed-irq-storm.py
-@@ -112,6 +112,8 @@
+@@ -112,6 +112,8 @@ static int set_wed(struct airoha_ppe_dev *ppe,bool enabled)
      assert(!enabled && airoha_wed_lock.held);
      assert(step++==0);ppe->enabled=enabled;return 0;
  }
@@ -299,10 +309,26 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
  static int airoha_wed_quiesce(struct mtk_wed_device *wed)
  {
      assert(wed->priv->quiesce_lock.held);drains++;
+@@ -148,6 +150,14 @@ static void masking_tests(void)
+     struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
+     initialize(&aw,&wed,&ppe);
+     u32 error=MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
++    u32 benign=BIT(1);
++    airoha_wed_irq_mask(&wed,0x20);
++    aw.regs[MTK_WED_EXT_INT_STATUS/4]=benign;
++    assert(!asserted(&aw));
++    assert(!airoha_wed_irq_get(&wed,0x20));
++    assert(aw.regs[MTK_WED_EXT_INT_STATUS/4]==benign);
++    assert(aw.irq_count.v==0 && exceptions==0);
++
+     airoha_wed_irq_mask(&wed,0x20);aw.regs[MTK_WED_EXT_INT_STATUS/4]=error;
+     assert(error==0x80000 && asserted(&aw));
+     airoha_wed_irq_mask(&wed,0);assert(!asserted(&aw));
 diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+index ead872e..abb010b 100644
 --- a/scripts/tests/test-workflow-paths.py
 +++ b/scripts/tests/test-workflow-paths.py
-@@ -106,6 +106,7 @@
+@@ -106,6 +106,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
          self.write(Path('recipe/scripts/prepare.py'), stub)
          self.write(Path('recipe/scripts/tests/test-wed-probe.py'), stub)
          self.write(Path('recipe/scripts/tests/test-wed-irq-storm.py'), stub)
@@ -311,9 +337,10 @@ diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-
          self.write(Path('recipe/scripts/tests/test-ppe-flow-setup.py'), stub)
          self.write(Path('recipe/scripts/tests/test-wed-flow-blocks.py'), stub)
 diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+index c8c0272..f6b91bb 100644
 --- a/scripts/validate-build.sh
 +++ b/scripts/validate-build.sh
-@@ -27,6 +27,7 @@
+@@ -27,6 +27,7 @@ for kernel_config in "${kernel_configs[@]}"; do
    python3 "$GITHUB_WORKSPACE/scripts/prepare.py" kernel "$kernel/.config"
    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-probe.py" --kernel "$kernel"
    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-irq-storm.py" --kernel "$kernel"
@@ -323,21 +350,16 @@ diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-flow-blocks.py" --kernel "$kernel"
 diff --git a/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch b/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch
 new file mode 100644
+index 0000000..58cc4fd
 --- /dev/null
 +++ b/target/linux/airoha/patches-6.18/950-net-airoha-record-wed-first-error-and-txfree.patch
-@@ -0,0 +1,618 @@
+@@ -0,0 +1,625 @@
 +From: PonWrt developers <noreply@localhost>
-+Subject: [PATCH] net: airoha: capture first WED token and coherent errors
++Subject: [PATCH] net: airoha: capture WED diagnostics with valid hunk ranges
 +
-+Count each extended error bit independently of console ratelimiting.
-+Keep separate bounded snapshots for missing-payload and RX coherent
-+events before W1C acknowledgment. Record native and shadow ring
-+positions and allocated coherent descriptors without following DMA
-+pointers or changing hardware state. Hardware-owned snapshots can move.
-+
-+Decode bounded CPU-owned TX-free notifications supplied by mt76 and
-+save the preceding and following host views. Expose records through a
-+root-readable debugfs file, retaining existing error logs and masks.
++Refresh the generated WED diagnostic patch after expanding the bounded
++TX-free record and attaching follow-up token candidates. Keep the inner
++patch syntactically valid so build-time patch checks can apply it.
 +
 +Signed-off-by: PonWrt developers <noreply@localhost>
 +---
@@ -371,7 +393,7 @@ new file mode 100644
 + 	struct device_node *pcie;
 + 	void __iomem *base;
 + 	void __iomem *wdma;
-+@@ -240,6 +246,328 @@
++@@ -240,6 +246,343 @@
 + 	return 0;
 + }
 + 
@@ -479,7 +501,7 @@ new file mode 100644
 ++		airoha_wed_diag_ring(aw, &record->rings[3 + i], &wed->tx_ring[i], 0x600 + i * 16);
 ++	}
 ++	/* Candidate tokens from the preceding host view, not a claimed fault ID. */
-++	for (i = 0; i < diag->state.latest.saved_tokens && saved < AIROHA_WED_DIAG_BUFS / 2; i++) {
+++	for (i = 0; i < diag->state.latest.saved_tokens && saved < AIROHA_WED_DIAG_BUFS; i++) {
 ++		u32 token = diag->state.latest.token[i];
 ++
 ++		if (token < wed->wlan.token_start ||
@@ -578,10 +600,25 @@ new file mode 100644
 ++	spin_lock_irqsave(&diag->lock, flags);
 ++	record.sequence = ++diag->state.notifications;
 ++	diag->state.latest = record;
-++	for (i = 0; i < ARRAY_SIZE(diag->state.first); i++)
-++		if (diag->state.first[i].valid && record.ns >= diag->state.first[i].ns &&
-++		    !diag->state.first[i].host_after.sequence)
-++			diag->state.first[i].host_after = record;
+++	for (i = 0; i < ARRAY_SIZE(diag->state.first); i++) {
+++		unsigned int candidate, saved = 0;
+++
+++		if (!diag->state.first[i].valid || record.ns < diag->state.first[i].ns ||
+++		    diag->state.first[i].host_after.sequence)
+++			continue;
+++		diag->state.first[i].host_after = record;
+++		for (candidate = 0; candidate < record.saved_tokens &&
+++		     saved < AIROHA_WED_DIAG_BUFS; candidate++) {
+++			u32 token = record.token[candidate];
+++
+++			if (token < wed->wlan.token_start ||
+++			    token - wed->wlan.token_start >= wed->wlan.nbuf)
+++				continue;
+++			airoha_wed_diag_buffer(wed, &diag->state.first[i].buffers[saved],
+++				token - wed->wlan.token_start);
+++			diag->state.first[i].buffers[saved++].source = 0x40 + candidate;
+++		}
+++	}
 ++	spin_unlock_irqrestore(&diag->lock, flags);
 ++}
 ++EXPORT_SYMBOL_GPL(airoha_wed_diag_txfree);
@@ -618,16 +655,16 @@ new file mode 100644
 ++	memcpy(&copy->state, &aw->diag->state, sizeof(copy->state));
 ++	spin_unlock_irqrestore(&aw->diag->lock, flags);
 ++
-++	seq_printf(s, "format=1 atomic=0 before_w1c=1 services=%llu notifications=%llu\\n",
+++	seq_printf(s, "format=1 atomic=0 before_w1c=1 services=%llu notifications=%llu\n",
 ++		   copy->state.services, copy->state.notifications);
-++	seq_puts(s, "host_view=after_hardware candidates_are_not_fault_ids=1\\n");
+++	seq_puts(s, "host_view=after_hardware candidates_are_not_fault_ids=1\n");
 ++	for (bit = 0; bit < 32; bit++) {
 ++		if (!(EN7581_WED_EXT_ERRORS & BIT(bit)))
 ++			continue;
-++		seq_printf(s, "bit=%u count=%llu first=%llu last=%llu\\n", bit,
+++		seq_printf(s, "bit=%u count=%llu first=%llu last=%llu\n", bit,
 ++			   copy->state.count[bit], copy->state.first_ns[bit],
 ++			   copy->state.last_ns[bit]);
-++		seq_printf(s, "wdma=%u,%u last=%u,%u\\n",
+++		seq_printf(s, "wdma=%u,%u last=%u,%u\n",
 ++			   copy->state.first_wdma[bit][0], copy->state.first_wdma[bit][1],
 ++			   copy->state.last_wdma[bit][0], copy->state.last_wdma[bit][1]);
 ++	}
@@ -635,24 +672,24 @@ new file mode 100644
 ++	for (i = 0; i < ARRAY_SIZE(copy->state.first); i++) {
 ++		const struct airoha_wed_error_record *r = &copy->state.first[i];
 ++
-++		seq_printf(s, "first bit=%u valid=%u ns=%llu service=%llu\\n",
+++		seq_printf(s, "first bit=%u valid=%u ns=%llu service=%llu\n",
 ++			   i ? 18 : 1, r->valid, r->ns, r->services);
-++		seq_printf(s, "status=%08x errors=%08x token_start=%u token_count=%u\\n",
+++		seq_printf(s, "status=%08x errors=%08x token_start=%u token_count=%u\n",
 ++			   r->status, r->errors, r->token_start, r->token_count);
 ++		if (!r->valid)
 ++			continue;
 ++		for (j = 0; j < AIROHA_WED_DIAG_REGS; j++) {
-++			seq_printf(s, "reg=%03x value=%08x\\n",
+++			seq_printf(s, "reg=%03x value=%08x\n",
 ++				   airoha_wed_diag_registers[j], r->registers[j]);
 ++		}
 ++		seq_puts(s, "native_txfree before=");
-++		seq_printf(s, "%08x,%08x,%08x,%08x after=%08x,%08x,%08x,%08x\\n",
+++		seq_printf(s, "%08x,%08x,%08x,%08x after=%08x,%08x,%08x,%08x\n",
 ++			   r->native_before[0], r->native_before[1],
 ++			   r->native_before[2], r->native_before[3],
 ++			   r->native_after[0], r->native_after[1],
 ++			   r->native_after[2], r->native_after[3]);
 ++		seq_puts(s, "wpdma_txfree before=");
-++		seq_printf(s, "%08x,%08x,%08x,%08x after=%08x,%08x,%08x,%08x\\n",
+++		seq_printf(s, "%08x,%08x,%08x,%08x after=%08x,%08x,%08x,%08x\n",
 ++			   r->wpdma_before[0], r->wpdma_before[1],
 ++			   r->wpdma_before[2], r->wpdma_before[3],
 ++			   r->wpdma_after[0], r->wpdma_after[1],
@@ -660,16 +697,16 @@ new file mode 100644
 ++		for (j = 0; j < AIROHA_WED_DIAG_RINGS; j++) {
 ++			const struct airoha_wed_ring_record *ring = &r->rings[j];
 ++
-++			seq_printf(s, "ring=%u valid=%u before=%08x,%08x,%08x,%08x\\n",
+++			seq_printf(s, "ring=%u valid=%u before=%08x,%08x,%08x,%08x\n",
 ++				   j, ring->valid, ring->before[0], ring->before[1],
 ++				   ring->before[2], ring->before[3]);
-++			seq_printf(s, "ring_after=%08x,%08x,%08x,%08x\\n",
+++			seq_printf(s, "ring_after=%08x,%08x,%08x,%08x\n",
 ++				   ring->after[0], ring->after[1], ring->after[2],
 ++				   ring->after[3]);
 ++			if (!ring->valid)
 ++				continue;
 ++			for (k = 0; k < AIROHA_WED_DIAG_DESCS; k++) {
-++				seq_printf(s, "desc=%u index=%u words=%08x,%08x,%08x,%08x\\n",
+++				seq_printf(s, "desc=%u index=%u words=%08x,%08x,%08x,%08x\n",
 ++					   j, ring->index[k], ring->descriptor[k][0],
 ++					   ring->descriptor[k][1], ring->descriptor[k][2],
 ++					   ring->descriptor[k][3]);
@@ -680,13 +717,13 @@ new file mode 100644
 ++
 ++			if (!b->valid)
 ++				continue;
-++			seq_printf(s, "buffer=%u dma=%08x token=%u length=%u ptr=%08x\\n",
+++			seq_printf(s, "buffer=%u dma=%08x token=%u length=%u ptr=%08x\n",
 ++				   b->pool_index, b->dma, b->token, b->length,
 ++				   b->payload_ptr);
-++			seq_printf(s, "buffer_meta rept=%u bss=%u nbuf=%u source=%u matches=%u\\n",
+++			seq_printf(s, "buffer_meta rept=%u bss=%u nbuf=%u source=%u matches=%u\n",
 ++				   b->rept, b->bss, b->nbuf, b->source,
 ++				   b->token_matches);
-++			seq_printf(s, "payload_valid=%u payload=%*phN\\n",
+++			seq_printf(s, "payload_valid=%u payload=%*phN\n",
 ++				   b->payload_valid, (int)sizeof(b->payload), b->payload);
 ++		}
 ++		airoha_wed_diag_show_free(s, "host_before", &r->host_before);
@@ -700,7 +737,7 @@ new file mode 100644
 + #define AIROHA_WED_IRQ_STORM_LIMIT	20000
 + 
 + static bool airoha_wed_irq_progress(struct airoha_wed *aw)
-+@@ -331,6 +659,7 @@
++@@ -331,6 +674,7 @@
 + 	/* Which status bits keep asserting; rate limited by the dbg macro. */
 + 	airoha_wlan_dbg(aw->dev, "wed", "event=irq raw=%08x mask=%08x ext=%08x",
 + 			raw, mask, ext);
@@ -708,7 +745,7 @@ new file mode 100644
 + 	if (status)
 + 		airoha_wed_write(wed, MTK_WED_INT_STATUS, status);
 + 	if (errors) {
-+@@ -983,6 +1312,7 @@
++@@ -983,6 +1327,7 @@
 + {
 + 	struct airoha_wed *aw = data;
 + 
@@ -716,7 +753,7 @@ new file mode 100644
 + 	debugfs_remove(aw->debugfs);
 + 	/* Managed device links detach the wireless consumer first. */
 + 	mutex_lock(&airoha_wed_lock);
-+@@ -994,6 +1324,12 @@
++@@ -994,6 +1339,12 @@
 + 	of_node_put(aw->pcie);
 + }
 + 
@@ -729,7 +766,7 @@ new file mode 100644
 + static int airoha_wed_probe(struct platform_device *pdev)
 + {
 + 	struct device *dev = &pdev->dev;
-+@@ -1005,6 +1341,10 @@
++@@ -1005,6 +1356,10 @@
 + 	aw = devm_kzalloc(dev, sizeof(*aw), GFP_KERNEL);
 + 	if (!aw)
 + 		return -ENOMEM;
@@ -740,7 +777,7 @@ new file mode 100644
 + 	aw->dev = dev;
 + 	INIT_WORK(&aw->irq_fault_work, airoha_wed_irq_fault_work);
 + 	mutex_init(&aw->quiesce_lock);
-+@@ -1051,6 +1391,7 @@
++@@ -1051,6 +1406,7 @@
 + 	if (!err) {
 + 		aw->debugfs = debugfs_create_file("airoha-wed", 0444, NULL, aw,
 + 						&airoha_wed_status_fops);
@@ -749,7 +786,6 @@ new file mode 100644
 + 	}
 + error_node:
 +diff --git a/drivers/net/ethernet/airoha/airoha_wed_diag.h b/drivers/net/ethernet/airoha/airoha_wed_diag.h
-+new file mode 100644
 +--- /dev/null
 ++++ b/drivers/net/ethernet/airoha/airoha_wed_diag.h
 +@@ -0,0 +1,163 @@
@@ -757,12 +793,12 @@ new file mode 100644
 ++#ifndef __AIROHA_WED_DIAG_PRIVATE_H
 ++#define __AIROHA_WED_DIAG_PRIVATE_H
 ++
-++#define AIROHA_WED_DIAG_WORDS	32
-++#define AIROHA_WED_DIAG_TOKENS	16
+++#define AIROHA_WED_DIAG_WORDS	256
+++#define AIROHA_WED_DIAG_TOKENS	256
 ++#define AIROHA_WED_DIAG_DESCS	4
 ++#define AIROHA_WED_DIAG_RINGS	5
 ++#define AIROHA_WED_DIAG_REGS	12
-++#define AIROHA_WED_DIAG_BUFS	4
+++#define AIROHA_WED_DIAG_BUFS	256
 ++
 ++struct airoha_wed_free_record {
 ++	u64 ns;
@@ -778,8 +814,8 @@ new file mode 100644
 ++	u16 station_words;
 ++	u16 mpdu_words;
 ++	u8 version;
-++	u8 raw_words;
-++	u8 saved_tokens;
+++	u16 raw_words;
+++	u16 saved_tokens;
 ++	bool truncated;
 ++	bool malformed;
 ++	bool unsupported;
@@ -917,7 +953,6 @@ new file mode 100644
 ++
 ++#endif
 +diff --git a/include/linux/soc/airoha/airoha_wed_diag.h b/include/linux/soc/airoha/airoha_wed_diag.h
-+new file mode 100644
 +--- /dev/null
 ++++ b/include/linux/soc/airoha/airoha_wed_diag.h
 +@@ -0,0 +1,23 @@
@@ -944,3 +979,32 @@ new file mode 100644
 ++#endif
 ++
 ++#endif
+diff --git a/target/linux/airoha/patches-6.18/951-net-airoha-mask-benign-tkid-without-payload.patch b/target/linux/airoha/patches-6.18/951-net-airoha-mask-benign-tkid-without-payload.patch
+new file mode 100644
+index 0000000..a25790d
+--- /dev/null
++++ b/target/linux/airoha/patches-6.18/951-net-airoha-mask-benign-tkid-without-payload.patch
+@@ -0,0 +1,23 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] net: airoha: mask benign TKID without-payload status
++
++The stock HG5585F token path reports CPU TX-free entries through the
++shared notification stream. On Airoha WED, status bit 1 describes those
++entries and otherwise creates a continuous interrupt/log storm while DMA
++continues to make progress and the WED payload buffers remain valid.
++Exclude only this status from the WED extended interrupt mask; retain all
++other error bits and the existing progress/quarantine handling.
++
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++--- a/drivers/net/ethernet/airoha/airoha_wed.c
+++++ b/drivers/net/ethernet/airoha/airoha_wed.c
++@@ -47,7 +47,7 @@
++ #define EN7581_WED_BUFFER_SIZE		2048
++ #define EN7581_WED_BUFS_PER_PAGE		(PAGE_SIZE / EN7581_WED_BUFFER_SIZE)
++ #define EN7581_WED_PAYLOAD_SIZE		1900
++-#define EN7581_WED_EXT_ERRORS		0x006f0013
+++#define EN7581_WED_EXT_ERRORS		0x006f0011
++ #define EN7581_WED_WDMA_CFG		0x50710060
++ #define EN7581_WDMA_CFG			0x5c000450
++ #define EN7581_WED_WDMA_RX_THRESH(n)	(0x940 + (n) * 4)

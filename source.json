@@ -4,112 +4,32 @@
   "exported_from": "new",
   "patches": [
     {
-      "name": "0001-hg5585f-board-and-calibration.patch",
-      "sha256": "f0055d3a9a4dff2a7870cf04490887046031ccec23c7eafecb9599562d294d63"
+      "name": "0001-hg5585f-foundation.patch",
+      "sha256": "6483e73d74875dbd9488a0b0aa39b799ab285fb98732b06f86388398459af68c"
     },
     {
-      "name": "0002-airoha-wifi-npu-wed-ppe.patch",
-      "sha256": "50678113c71d10d2971095b09b112b05dca825de7f0aa780ee97a0da868cadcd"
+      "name": "0002-hg5585f-wifi-base.patch",
+      "sha256": "34477e46ccbb1b7ab18b36f4eca75a70c237507f8d16ad1000de00c9a3b0fedd"
     },
     {
-      "name": "0003-hg5585f-firmware-and-validation.patch",
-      "sha256": "e943c343d8e3a9e7fbd0feefe37b7cc2d1258452ffb2ad8fa99fbe9d53f4e093"
+      "name": "0003-hg5585f-wed-base.patch",
+      "sha256": "f28ceb82506a3e7a129175208945b20cf13e49e9d0af1948dc313d3bd542ef30"
     },
     {
-      "name": "0005-hg5585f-build-profile.patch",
-      "sha256": "e9b9dda0ad9f4c2eec7d4377c974893855fa5bf9b1f8589cb9f0ce769fd71d34"
+      "name": "0004-hg5585f-npu-integration.patch",
+      "sha256": "e8232ee7cbadfd4b7dafdec216223f4f256e6bf857f4f45ee607a48f8e2cd3b7"
     },
     {
-      "name": "0006-hg5585f-wifi-review-and-diagnostics.patch",
-      "sha256": "ea6c008527c75287d2777de7bdea5751178ee1f518dd88fdd6205e1e2130c59f"
+      "name": "0005-hg5585f-flowtable.patch",
+      "sha256": "160f21c7b013d7a199eefac59cb259ee50c6b0fb321300a023c2fd00ee26352a"
     },
     {
-      "name": "0007-hg5585f-wed-port-and-probe-cleanup.patch",
-      "sha256": "a68cdf1963676f710801039a51579f2464fafdad31d6807db64e6072ed3f151e"
+      "name": "0006-hg5585f-wed-runtime.patch",
+      "sha256": "72048c6c73eb4f3f89d40e20b0099e1442ae1df36b86633780ad8e94c89afeed"
     },
     {
-      "name": "0008-hg5585f-wed-attach-trace-and-irq-storm-guard.patch",
-      "sha256": "c1d6662abda7f5db67e7bd1e260ba7df2d120bcdd58e06ce2214b1463a8fdbe7"
-    },
-    {
-      "name": "0009-hg5585f-wed-extended-irq-masking.patch",
-      "sha256": "483b46ce6308be580c2e45c89dcaa6da4822378699bdfdc0b34eca391b1629eb"
-    },
-    {
-      "name": "0010-hg5585f-wed-pcie-intx.patch",
-      "sha256": "e6e6a9727a2c92a479a0e91d9f1dfbff04d128c8d8dc5a73ae72f84ee4ca363a"
-    },
-    {
-      "name": "0011-hg5585f-wed-native-rx-irq-map.patch",
-      "sha256": "7cd005c73e2e54d9b053f0583fbfd6461c1f05f74f6439b90e56b9432cf1abf4"
-    },
-    {
-      "name": "0012-hg5585f-npu-probe-reset-lifecycle.patch",
-      "sha256": "c534796997d2158ec352d57e916c2d0d4e475d4f320c65f72abca145f86ec056"
-    },
-    {
-      "name": "0013-hg5585f-ppe-clear-stale-enable.patch",
-      "sha256": "fb3ca19a76b78c4dd928da8389ee21d198841996b17db4e3bf52526a5f1d350a"
-    },
-    {
-      "name": "0014-hg5585f-npu-dma-device.patch",
-      "sha256": "59a68c2650eaaa2ee2a42ff7e1ddd2a999aa9a4eaf9362b86d3bd06cbddd90f0"
-    },
-    {
-      "name": "0015-hg5585f-npu-input-ring-768.patch",
-      "sha256": "5fb3d5d8be1d14b5c2fa527752538c5e43f781b412497a6b59ce0bd71900375f"
-    },
-    {
-      "name": "0016-hg5585f-wifi-flowtable-diagnostics.patch",
-      "sha256": "ae8d313a089465e97ecca7b6ef4aa6ccb2bdd9388e79a9b503624953180eabcf"
-    },
-    {
-      "name": "0017-hg5585f-bridge-wifi-forward-path.patch",
-      "sha256": "9379acf7646596dde3ebcea1abd6decbe36f1bef408056064529e59e036b9688"
-    },
-    {
-      "name": "0018-hg5585f-wed-txp-wcid-sentinel.patch",
-      "sha256": "d4041fb972d7c74537a634c73770e15f1d088cb46a177b66a96948573cd311ff"
-    },
-    {
-      "name": "0019-hg5585f-wed-irq-progress-and-quarantine.patch",
-      "sha256": "5fa0bbfe1f79e192cc89073d0bb251939827630fd92dd1fc49f25a1bd83ccd9c"
-    },
-    {
-      "name": "0020-hg5585f-wed-exception-snapshots.patch",
-      "sha256": "f9df447039bf06dd1740c083994c991becf76fe83f893ec8ff0fd5d0f29d4fd4"
-    },
-    {
-      "name": "0021-hg5585f-wed-diag-capture-256.patch",
-      "sha256": "d37146763d63c306b6216b0a166100395cdcc536f393b01bd477c17ac3d70ad3"
-    },
-    {
-      "name": "0022-hg5585f-wed-capture-followup-tokens.patch",
-      "sha256": "01903f37d61f7982381cfa9851fa9197babf1551ddb23afa61b420f8748462ba"
-    },
-    {
-      "name": "0023-hg5585f-wed-diagnostics-patch-valid-hunks.patch",
-      "sha256": "6492518b9a7797939027b8686216799873519ae66e5b9c9f85bd4848300997b0"
-    },
-    {
-      "name": "0024-hg5585f-wed-select-followup-tokens.patch",
-      "sha256": "a0479644fc8eee44f4b42f07fbb54817bffe72f6b7f9664b28a4897014329b8c"
-    },
-    {
-      "name": "0025-hg5585f-wed-init-followup-saved-index.patch",
-      "sha256": "c12c4c43778a29d5f796140bc231c32d7b3756fccd89475b338f56f1ce57d452"
-    },
-    {
-      "name": "0026-hg5585f-wed-remove-shadowed-candidate.patch",
-      "sha256": "23cb4e433be1fb8537abbaead133e7fb5d5c2bff1b92190c019e8f93c068096d"
-    },
-    {
-      "name": "0027-hg5585f-wed-retain-all-candidates.patch",
-      "sha256": "5948c5c65e8af1c40c8fce583dbd0d69e959e41387aad6104fcff432af9e56f0"
-    },
-    {
-      "name": "0028-hg5585f-mask-benign-tkid-error.patch",
-      "sha256": "91fe492e0f905c4367f22644b320898da6cfa98371081e986556e0567c571318"
+      "name": "0007-hg5585f-wed-diagnostics.patch",
+      "sha256": "5ed1f71706554e6d616209139d3f1a682c463595158a4193b25a2c8a5e73cdd6"
     }
   ],
   "files": {

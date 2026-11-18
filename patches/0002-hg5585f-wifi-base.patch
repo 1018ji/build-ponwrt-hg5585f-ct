@@ -1,6 +1,6 @@
 diff --git a/files/etc/config/hg5585f_wifi b/files/etc/config/hg5585f_wifi
 new file mode 100644
-index 0000000000000000000000000000000000000000..236b3d380ac0a21209ea8f1f8d3fbcbb3c3d32fc
+index 0000000..236b3d3
 --- /dev/null
 +++ b/files/etc/config/hg5585f_wifi
 @@ -0,0 +1,2 @@
@@ -8,7 +8,7 @@ index 0000000000000000000000000000000000000000..236b3d380ac0a21209ea8f1f8d3fbcbb
 +	option enabled '0'
 diff --git a/files/etc/init.d/hg5585f-wifi-diag b/files/etc/init.d/hg5585f-wifi-diag
 new file mode 100755
-index 0000000000000000000000000000000000000000..a49e0a7cd049dcb1ba96c9564ae3c17c2fee9a26
+index 0000000..a49e0a7
 --- /dev/null
 +++ b/files/etc/init.d/hg5585f-wifi-diag
 @@ -0,0 +1,17 @@
@@ -30,7 +30,7 @@ index 0000000000000000000000000000000000000000..a49e0a7cd049dcb1ba96c9564ae3c17c
 +	/usr/sbin/hg5585f-wifi-diag runtime-off
 +}
 diff --git a/files/etc/init.d/mt7916-an-eeprom b/files/etc/init.d/mt7916-an-eeprom
-index 07019d484da67e617e74b371b80ffaf661329250..910a7ebde22340ff62e53e13012ab285fdc45ef5 100755
+index 07019d4..910a7eb 100755
 --- a/files/etc/init.d/mt7916-an-eeprom
 +++ b/files/etc/init.d/mt7916-an-eeprom
 @@ -15,7 +15,7 @@ start() {
@@ -43,7 +43,7 @@ index 07019d484da67e617e74b371b80ffaf661329250..910a7ebde22340ff62e53e13012ab285
  	}
  }
 diff --git a/files/etc/uci-defaults/99-hg5585f-hardware b/files/etc/uci-defaults/99-hg5585f-hardware
-index 937edf3efa0f3c9ac5e88197254195ec8fff48a5..f4ec6576a9f2d90b509a03a53dc674128e36fc76 100755
+index 937edf3..f4ec657 100755
 --- a/files/etc/uci-defaults/99-hg5585f-hardware
 +++ b/files/etc/uci-defaults/99-hg5585f-hardware
 @@ -12,4 +12,5 @@ commit firewall
@@ -54,7 +54,7 @@ index 937edf3efa0f3c9ac5e88197254195ec8fff48a5..f4ec6576a9f2d90b509a03a53dc67412
  exit 0
 diff --git a/files/usr/sbin/hg5585f-wifi-diag b/files/usr/sbin/hg5585f-wifi-diag
 new file mode 100755
-index 0000000000000000000000000000000000000000..901230f115ec5b390388e8631662dc654db989f7
+index 0000000..901230f
 --- /dev/null
 +++ b/files/usr/sbin/hg5585f-wifi-diag
 @@ -0,0 +1,139 @@
@@ -198,7 +198,7 @@ index 0000000000000000000000000000000000000000..901230f115ec5b390388e8631662dc65
 +	*) usage ;;
 +esac
 diff --git a/package/kernel/mt76/Makefile b/package/kernel/mt76/Makefile
-index 76d5572c227415b589ef1df41bf58859b2f0c9fa..555b690e3c6322f52a88969f5072dd7a0f2d32b4 100644
+index 76d5572..555b690 100644
 --- a/package/kernel/mt76/Makefile
 +++ b/package/kernel/mt76/Makefile
 @@ -1,7 +1,7 @@
@@ -212,7 +212,7 @@ index 76d5572c227415b589ef1df41bf58859b2f0c9fa..555b690e3c6322f52a88969f5072dd7a
  PKG_LICENSE_FILES:=
 diff --git a/package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch b/package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch
 new file mode 100644
-index 0000000000000000000000000000000000000000..3b4a83daaaab23dad1a7815d8c05ef4f7b2ac4c2
+index 0000000..3b4a83d
 --- /dev/null
 +++ b/package/kernel/mt76/patches/122-mt7915-hg5585f-recovery-and-diagnostics.patch
 @@ -0,0 +1,437 @@
@@ -654,7 +654,7 @@ index 0000000000000000000000000000000000000000..3b4a83daaaab23dad1a7815d8c05ef4f
 + 	if (count < 0) {
 + 		mt76_npu_legacy_rx_retire(dev, q, 1, NULL, NULL);
 diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
-index 76ba2aefe64f922f8809beb15b9778a545459031..54655871fdfc649028b2e192ace388c67d2c6f35 100644
+index 76ba2ae..5465587 100644
 --- a/scripts/check-hg5585f-offload.py
 +++ b/scripts/check-hg5585f-offload.py
 @@ -12,6 +12,7 @@ patches = [root / 'target/linux/airoha/patches-6.18' / name for name in (
@@ -667,7 +667,7 @@ index 76ba2aefe64f922f8809beb15b9778a545459031..54655871fdfc649028b2e192ace388c6
  for patch in patches:
 diff --git a/scripts/check-hg5585f-wifi-diagnostics.py b/scripts/check-hg5585f-wifi-diagnostics.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..f9b0be704113e4db5f882ef96ec1d10a0d62887a
+index 0000000..f9b0be7
 --- /dev/null
 +++ b/scripts/check-hg5585f-wifi-diagnostics.py
 @@ -0,0 +1,282 @@
@@ -955,7 +955,7 @@ index 0000000000000000000000000000000000000000..f9b0be704113e4db5f882ef96ec1d10a
 +    main()
 diff --git a/target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch b/target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch
 new file mode 100644
-index 0000000000000000000000000000000000000000..8197f4fef9eeb85f907e0b6ab277f5cefe95b0c7
+index 0000000..8197f4f
 --- /dev/null
 +++ b/target/linux/airoha/patches-6.18/938-net-airoha-hg5585f-wifi-diagnostics.patch
 @@ -0,0 +1,285 @@

@@ -1,7 +1,61 @@
+diff --git a/package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch b/package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch
+new file mode 100644
+index 0000000..94ed82b
+--- /dev/null
++++ b/package/kernel/mt76/patches/127-mt7915-airoha-wed-txp-wcid-sentinel.patch
+@@ -0,0 +1,47 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt7915: match stock Airoha WED header geometry
++
++The stock Airoha path reserves a 128-byte header window and keeps the
++payload in a separate DMA segment. The generic initializer publishes a
++76-byte packed window, which leaves short WED TX-free payloads with a
++different geometry. The Airoha callback now preserves the full AP WCID
++sentinel, clears the expanded header area and publishes payload at offset
++128. It is selected only by the existing Airoha DT property.
++This experiment changes only the Airoha callback.
++
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++diff --git a/mt7915/mmio.c b/mt7915/mmio.c
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -629,6 +629,19 @@
++ 
++ 	return ret;
++ }
+++static u32 mt7915_airoha_wed_init_buf(void *ptr, dma_addr_t phys, int token_id)
+++{
+++	struct mt76_connac_fw_txp *txp = ptr + MT_TXD_SIZE;
+++	u32 header = mt7915_wed_init_buf(ptr, phys, token_id);
+++
+++	memset(ptr + header, 0, 128 - header);
+++	txp->buf[0] = cpu_to_le32(phys + 128);
+++	/* Keep the stock 128-byte header window and the full AP sentinel. */
+++	txp->rept_wds_wcid = cpu_to_le16(0x3ff);
+++
+++	return header + 52;
+++}
+++
++ #endif
++ 
++ int mt7915_mmio_wed_init(struct mt7915_dev *dev, void *pdev_ptr,
++@@ -711,7 +724,9 @@
++ 		wed->wlan.rx_tbit[1] = 19;
++ 	}
++ 
++-	wed->wlan.init_buf = mt7915_wed_init_buf;
+++	wed->wlan.init_buf =
+++		of_property_present(dev->mt76.dev->of_node, "airoha,wed") ?
+++		mt7915_airoha_wed_init_buf : mt7915_wed_init_buf;
++ 	wed->wlan.offload_enable = mt76_wed_offload_enable;
++ 	wed->wlan.offload_disable = mt76_wed_offload_disable;
++ 	wed->wlan.init_rx_buf = mt76_wed_init_rx_buf;
 diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
+index 8c58f4f..f16597e 100644
 --- a/scripts/check-hg5585f-offload.py
 +++ b/scripts/check-hg5585f-offload.py
-@@ -23,6 +23,7 @@
+@@ -23,6 +23,7 @@ patches = [root / 'target/linux/airoha/patches-6.18' / name for name in (
      '946-net-airoha-ppe-flow-diagnostics.patch',
      '947-net-airoha-wed-allow-multiple-flow-blocks.patch',
      '948-netfilter-flowtable-use-wifi-bridge-endpoint.patch',
@@ -10,6 +64,7 @@ diff --git a/scripts/check-hg5585f-offload.py b/scripts/check-hg5585f-offload.py
  patches += sorted((root / 'package/kernel/mt76/patches').glob('*.patch'))
  for patch in patches:
 diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-storm.py
+index 73774e7..5643560 100644
 --- a/scripts/tests/test-wed-irq-storm.py
 +++ b/scripts/tests/test-wed-irq-storm.py
 @@ -1,5 +1,5 @@
@@ -19,7 +74,7 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
  import argparse
  from pathlib import Path
  import re
-@@ -8,7 +8,7 @@
+@@ -8,7 +8,7 @@ import tempfile
  
  
  def function(text, name, kind='static void'):
@@ -28,7 +83,7 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
      assert match, name
      brace = text.index('{', match.start())
      end, depth = brace + 1, 1
-@@ -22,144 +22,241 @@
+@@ -22,144 +22,241 @@ PREFIX = r'''
  #include <assert.h>
  #include <stdbool.h>
  #include <stdint.h>
@@ -37,10 +92,10 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
  #include <string.h>
 +#include <errno.h>
  typedef uint32_t u32;
+-#define BIT(n) (1U << (n))
 +typedef uint16_t u16;
-+typedef struct { int v; } atomic_t;
- #define BIT(n) (1U << (n))
--typedef struct { int v; } atomic_t;
+ typedef struct { int v; } atomic_t;
++#define BIT(n) (1U << (n))
  #define HZ 100
 +#define MTK_WED_TX_QUEUES 2
 +#define U16_MAX UINT16_MAX
@@ -69,22 +124,6 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
 -static int disables, errors, exceptions, mask_writes;
 -static u32 readl_reg(struct airoha_wed *aw, u32 off) { return aw->regs[off / 4]; }
 -static void writel_reg(struct airoha_wed *aw, u32 v, u32 off)
--{
--    if (off == MTK_WED_INT_STATUS || off == MTK_WED_EXT_INT_STATUS)
--        aw->regs[off / 4] &= ~v; /* hardware write-one-to-clear status */
--    else
--        aw->regs[off / 4] = v;
--}
--static u32 readl(const char *addr) { return *(const u32 *)addr; }
--static void writel(u32 v, char *addr) { *(u32 *)addr = v; }
--static void disable_irq_nosync(int irq) { (void)irq; disables++; }
--static void note(const char *f, ...) { (void)f; errors++; }
--#define dev_err(dev, ...) do { (void)(dev); note(__VA_ARGS__); } while (0)
--#define dev_warn_ratelimited(dev, ...) do { (void)(dev); exceptions++; } while (0)
--#define airoha_wlan_dbg(dev, ...) do { (void)(dev); } while (0)
--
--static void airoha_wed_write(struct mtk_wed_device *w, u32 off, u32 v) { writel_reg(w->priv, v, off); mask_writes++; }
--static u32 airoha_wed_read(struct mtk_wed_device *w, u32 off) { return readl_reg(w->priv, off); }
 +struct work_struct { bool queued; };
 +struct mutex { bool held; };
 +static struct mutex airoha_wed_lock;
@@ -135,11 +174,25 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
 +static u32 airoha_wed_read(struct mtk_wed_device *w,u32 off)
 +{ return w->priv->regs[off/4]; }
 +static void airoha_wed_write(struct mtk_wed_device *w,u32 off,u32 value)
-+{
+ {
+-    if (off == MTK_WED_INT_STATUS || off == MTK_WED_EXT_INT_STATUS)
+-        aw->regs[off / 4] &= ~v; /* hardware write-one-to-clear status */
+-    else
+-        aw->regs[off / 4] = v;
 +    if(off==MTK_WED_INT_STATUS || off==MTK_WED_EXT_INT_STATUS)
 +        w->priv->regs[off/4]&=~value;
 +    else w->priv->regs[off/4]=value;
-+}
+ }
+-static u32 readl(const char *addr) { return *(const u32 *)addr; }
+-static void writel(u32 v, char *addr) { *(u32 *)addr = v; }
+-static void disable_irq_nosync(int irq) { (void)irq; disables++; }
+-static void note(const char *f, ...) { (void)f; errors++; }
+-#define dev_err(dev, ...) do { (void)(dev); note(__VA_ARGS__); } while (0)
+-#define dev_warn_ratelimited(dev, ...) do { (void)(dev); exceptions++; } while (0)
+-#define airoha_wlan_dbg(dev, ...) do { (void)(dev); } while (0)
+-
+-static void airoha_wed_write(struct mtk_wed_device *w, u32 off, u32 v) { writel_reg(w->priv, v, off); mask_writes++; }
+-static u32 airoha_wed_read(struct mtk_wed_device *w, u32 off) { return readl_reg(w->priv, off); }
 +static int flush_wed(struct airoha_ppe_dev *ppe,u16 wcid)
 +{
 +    assert(wcid==U16_MAX);flushes++;
@@ -170,12 +223,22 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
  TESTS = r'''
 -#define LIMIT AIROHA_WED_IRQ_STORM_LIMIT
 -static bool irq_asserted(struct airoha_wed *aw)
--{
++static void initialize(struct airoha_wed *aw,struct mtk_wed_device *wed,
++                       struct airoha_ppe_dev *ppe)
+ {
 -    return (aw->regs[MTK_WED_INT_STATUS / 4] & aw->regs[MTK_WED_INT_MASK / 4]) ||
 -           (aw->regs[MTK_WED_EXT_INT_STATUS / 4] & aw->regs[MTK_WED_EXT_INT_MASK / 4]);
--}
++    memset(aw,0,sizeof(*aw));memset(wed,0,sizeof(*wed));
++    aw->base=(char *)aw->regs;aw->irq=27;aw->wlan=wed;aw->ppe=ppe;
++    aw->ppe_configured=true;wed->priv=aw;wed->running=true;
++    *ppe=(struct airoha_ppe_dev){.enabled=true,
++        .ops={.flush_wed=flush_wed,.set_wed=set_wed}};
++    disables=errors=exceptions=scheduled=mib_reads=flushes=drains=step=0;
++    flush_error=drain_error=0;expect_fault_order=false;jiffies=1000;
+ }
 -static void mask_and_ack_tests(void)
--{
++static bool asserted(struct airoha_wed *aw)
+ {
 -    struct device dev;
 -    struct airoha_wed aw = {.dev = &dev, .irq = 7};
 -    struct mtk_wed_device wed = {.priv = &aw};
@@ -223,24 +286,24 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
 -    airoha_wed_irq_mask(&wed, 0xff);
 -    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0 && aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
 -    puts("PASS: ext=00080000 deasserts during hard IRQ masking, is acknowledged by W1C and is delivered again after unmask");
-+static void initialize(struct airoha_wed *aw,struct mtk_wed_device *wed,
-+                       struct airoha_ppe_dev *ppe)
-+{
-+    memset(aw,0,sizeof(*aw));memset(wed,0,sizeof(*wed));
-+    aw->base=(char *)aw->regs;aw->irq=27;aw->wlan=wed;aw->ppe=ppe;
-+    aw->ppe_configured=true;wed->priv=aw;wed->running=true;
-+    *ppe=(struct airoha_ppe_dev){.enabled=true,
-+        .ops={.flush_wed=flush_wed,.set_wed=set_wed}};
-+    disables=errors=exceptions=scheduled=mib_reads=flushes=drains=step=0;
-+    flush_error=drain_error=0;expect_fault_order=false;jiffies=1000;
-+}
-+static bool asserted(struct airoha_wed *aw)
-+{
 +    return (aw->regs[MTK_WED_INT_STATUS/4]&aw->regs[MTK_WED_INT_MASK/4]) ||
 +           (aw->regs[MTK_WED_EXT_INT_STATUS/4]&aw->regs[MTK_WED_EXT_INT_MASK/4]);
-+}
+ }
+-int main(void)
 +static void masking_tests(void)
-+{
+ {
+-    mask_and_ack_tests();
+-    struct device dev; struct airoha_wed aw = {.dev = &dev, .irq = 7};
+-    aw.base = (char *)aw.regs;
+-    struct mtk_wed_device wed = {.priv = &aw};
+-    aw.regs[MTK_WED_INT_STATUS / 4] = 0xa5; aw.regs[MTK_WED_EXT_INT_STATUS / 4] = 0x5a;
+-    jiffies = 1000;
+-
+-    /* A normal rate never trips, and the window resets the counter. */
+-    for (int round = 0; round < 5; round++) {
+-        for (int i = 0; i < LIMIT; i++) airoha_wed_irq_mask(&wed, 0);
+-        assert(!disables && !aw.irq_disabled && !atomic_read(&aw.irq_storm));
+-        jiffies += HZ + 1;
 +    struct airoha_wed aw;struct mtk_wed_device wed;struct airoha_ppe_dev ppe;
 +    initialize(&aw,&wed,&ppe);
 +    u32 error=MTK_WED_EXT_INT_STATUS_RX_DRV_INIT_WDMA_EN;
@@ -257,7 +320,30 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
 +    assert(aw.regs[MTK_WED_INT_STATUS/4]==4 && exceptions==2);
 +    for(int n=0;n<3*AIROHA_WED_IRQ_STORM_LIMIT;n++) {
 +        airoha_wed_irq_mask(&wed,0);airoha_wed_irq_mask(&wed,0);
-+    }
+     }
+-    /* Non-zero masks are the re-enable path and never count. */
+-    for (int i = 0; i < 3 * LIMIT; i++) airoha_wed_irq_mask(&wed, 0x30);
+-    assert(!disables && atomic_read(&aw.irq_count) <= LIMIT);
+-    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0x30);
+-
+-    /* One extra interrupt in the same window trips the guard exactly once. */
+-    jiffies += HZ + 1;
+-    for (int i = 0; i < LIMIT + 1; i++) airoha_wed_irq_mask(&wed, 0);
+-    assert(disables == 1 && errors == 1 && aw.irq_disabled && atomic_read(&aw.irq_storm));
+-    assert(!aw.poisoned);                       /* DMA ownership state untouched */
+-    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0 && aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
+-    for (int i = 0; i < 5 * LIMIT; i++) airoha_wed_irq_mask(&wed, 0);
+-    assert(disables == 1 && errors == 1);       /* no repeat */
+-
+-    /* After the trip, re-enable requests are forced to zero. */
+-    airoha_wed_irq_mask(&wed, 0xff);
+-    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0);
+-    assert(aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
+-
+-    /* quarantine/detach see irq_disabled and do not disable the line twice. */
+-    int again = 0; if (!READ_ONCE(aw.irq_disabled)) again++;
+-    assert(again == 0);
+-    puts("PASS: WED IRQ storm guard trips once at the limit, resets per window, keeps poisoned clear and masks stay zero");
 +    assert(aw.irq_count.v==2 && !scheduled && !disables);
 +    aw.regs[MTK_WED_INT_STATUS/4]=0;
 +    for(int n=0;n<3*AIROHA_WED_IRQ_STORM_LIMIT;n++)
@@ -349,50 +435,14 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
 +        assert(aw.poisoned==(scenario!=0));
 +    }
 +    puts("PASS: poisoned/failed paths still invalidate and drain; failed ownership stays quarantined");
- }
- int main(void)
- {
--    mask_and_ack_tests();
--    struct device dev; struct airoha_wed aw = {.dev = &dev, .irq = 7};
--    aw.base = (char *)aw.regs;
--    struct mtk_wed_device wed = {.priv = &aw};
--    aw.regs[MTK_WED_INT_STATUS / 4] = 0xa5; aw.regs[MTK_WED_EXT_INT_STATUS / 4] = 0x5a;
--    jiffies = 1000;
--
--    /* A normal rate never trips, and the window resets the counter. */
--    for (int round = 0; round < 5; round++) {
--        for (int i = 0; i < LIMIT; i++) airoha_wed_irq_mask(&wed, 0);
--        assert(!disables && !aw.irq_disabled && !atomic_read(&aw.irq_storm));
--        jiffies += HZ + 1;
--    }
--    /* Non-zero masks are the re-enable path and never count. */
--    for (int i = 0; i < 3 * LIMIT; i++) airoha_wed_irq_mask(&wed, 0x30);
--    assert(!disables && atomic_read(&aw.irq_count) <= LIMIT);
--    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0x30);
--
--    /* One extra interrupt in the same window trips the guard exactly once. */
--    jiffies += HZ + 1;
--    for (int i = 0; i < LIMIT + 1; i++) airoha_wed_irq_mask(&wed, 0);
--    assert(disables == 1 && errors == 1 && aw.irq_disabled && atomic_read(&aw.irq_storm));
--    assert(!aw.poisoned);                       /* DMA ownership state untouched */
--    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0 && aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
--    for (int i = 0; i < 5 * LIMIT; i++) airoha_wed_irq_mask(&wed, 0);
--    assert(disables == 1 && errors == 1);       /* no repeat */
--
--    /* After the trip, re-enable requests are forced to zero. */
--    airoha_wed_irq_mask(&wed, 0xff);
--    assert(aw.regs[MTK_WED_INT_MASK / 4] == 0);
--    assert(aw.regs[MTK_WED_EXT_INT_MASK / 4] == 0);
--
--    /* quarantine/detach see irq_disabled and do not disable the line twice. */
--    int again = 0; if (!READ_ONCE(aw.irq_disabled)) again++;
--    assert(again == 0);
--    puts("PASS: WED IRQ storm guard trips once at the limit, resets per window, keeps poisoned clear and masks stay zero");
++}
++int main(void)
++{
 +    masking_tests();progress_tests();fault_tests();drain_tests();
      return 0;
  }
  '''
-@@ -174,21 +271,27 @@
+@@ -174,21 +271,27 @@ def main():
      registers = (args.kernel/'drivers/net/ethernet/mediatek/mtk_wed_regs.h').read_text()
      names = ('MTK_WED_INT_STATUS', 'MTK_WED_INT_MASK',
               'MTK_WED_EXT_INT_STATUS', 'MTK_WED_EXT_INT_MASK',
@@ -427,8 +477,144 @@ diff --git a/scripts/tests/test-wed-irq-storm.py b/scripts/tests/test-wed-irq-st
  
  
  if __name__ == '__main__':
+diff --git a/scripts/tests/test-wed-txp-template.py b/scripts/tests/test-wed-txp-template.py
+new file mode 100644
+index 0000000..22304f7
+--- /dev/null
++++ b/scripts/tests/test-wed-txp-template.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""Execute real mt7915 WED initializers and check the ordinary AP sentinel."""
++import argparse
++import re
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def function(text, name):
++    pos = text.index('u32 '+name+'(')
++    start = text.rfind('\n', 0, pos)+1
++    brace = text.index('{', pos)
++    end, depth = brace+1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mt76', type=Path, required=True)
++    args = parser.parse_args()
++    native = function((args.mt76/'mt7915/mac.c').read_text(), 'mt7915_wed_init_buf')
++    layout = re.search(r'struct mt76_connac_fw_txp \{.*?\} __packed __aligned\(4\);', (args.mt76/'mt76_connac.h').read_text(), re.S)[0]
++    mmio = (args.mt76/'mt7915/mmio.c').read_text()
++    airoha = function(mmio, 'mt7915_airoha_wed_init_buf')
++    # Exercise the actual selector too: generic WED keeps its initializer.
++    begin = mmio.index('\twed->wlan.init_buf =')
++    end = mmio.index(';', begin)+1
++    selector = mmio[begin:end]
++    source = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++typedef uint8_t u8;
++typedef uint32_t u32;
++typedef uint64_t dma_addr_t;
++typedef uint16_t __le16;
++typedef uint32_t __le32;
++#define MT_TXD_SIZE 32
++#define MT_TXD0_TX_BYTES 0xffffU
++#define MT_TXD0_PKT_FMT (3U << 23)
++#define MT_TX_TYPE_CT 0
++#define MT_TXD1_LONG_FORMAT (1U << 31)
++#define MT_TXD1_HDR_FORMAT (3U << 16)
++#define MT_HDR_FORMAT_802_3 0
++#define FIELD_PREP(mask,value) (((value) << __builtin_ctz(mask)) & (mask))
++#define cpu_to_le16(v) ((uint16_t)(v))
++#define cpu_to_le32(v) ((uint32_t)(v))
++#define MT_TXP_MAX_BUF_NUM 6
++#define __packed __attribute__((packed))
++#define __aligned(x) __attribute__((aligned(x)))
++'''+layout+r'''
++'''+native+'\n'+airoha+r'''
++static bool of_property_present(void *node, const char *property)
++{ assert(!strcmp(property, "airoha,wed")); return !!node; }
++struct fake_dev { struct { struct { void *of_node; } *dev; } mt76; };
++struct fake_wed { struct {u32 (*init_buf)(void *, dma_addr_t, int);} wlan; };
++static void select_buf(struct fake_dev *dev, struct fake_wed *wed)
++{
++'''+selector+r'''
++}
++int main(void)
++{
++    _Static_assert(sizeof(struct mt76_connac_fw_txp)==44, "TXP stride");
++    _Static_assert(offsetof(struct mt76_connac_fw_txp,rept_wds_wcid)==5, "sentinel offset");
++    const int tokens[] = {0,4095,4096,8191};
++    for (unsigned int i=0;i<sizeof(tokens)/sizeof(tokens[0]);i++) {
++        unsigned char regular[128], fixed[128];
++        memset(regular,0xa5,sizeof(regular));memset(fixed,0xa5,sizeof(fixed));
++        assert(mt7915_wed_init_buf(regular,0x90001000,tokens[i])==76);
++        assert(mt7915_airoha_wed_init_buf(fixed,0x90001000,tokens[i])==128);
++        struct mt76_connac_fw_txp *txp=(void *)(fixed+MT_TXD_SIZE);
++        assert(txp->rept_wds_wcid==0x3ff);
++        assert(txp->token==tokens[i] && txp->nbuf==1 && txp->buf[0]==0x90001080);
++        assert(((struct mt76_connac_fw_txp *)(regular+MT_TXD_SIZE))->rept_wds_wcid==0);
++        for(unsigned int byte=0;byte<sizeof(fixed);byte++)
++            if((byte<36 || (byte>=44 && byte<76))) assert(fixed[byte]==regular[byte]);
++        /* Hardware supplies the low eight WCID bits; the upper bits survive. */
++        fixed[37]=0xff;fixed[36]=1;
++        assert(txp->rept_wds_wcid==0x3ff && txp->bss_idx==1);
++    }
++    struct {void *of_node;} device={0};
++    struct fake_dev dev={0};struct fake_wed wed={0};
++    dev.mt76.dev=(void *)&device;
++    select_buf(&dev,&wed);assert(wed.wlan.init_buf==mt7915_wed_init_buf);
++    device.of_node=&device;
++    select_buf(&dev,&wed);assert(wed.wlan.init_buf==mt7915_airoha_wed_init_buf);
++    return 0;
++}
++'''
++    with tempfile.TemporaryDirectory() as temporary:
++        path, binary = Path(temporary)/'test.c', Path(temporary)/'test'
++        path.write_text(source)
++        subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror',str(path),'-o',str(binary)],check=True)
++        subprocess.run([str(binary)],check=True)
++    print('PASS: real Airoha TXP initializer preserves 0x3ff across WCID rewrite, boundary tokens and DMA layout; generic WED selection preserved')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/tests/test-workflow-paths.py b/scripts/tests/test-workflow-paths.py
+index a37fcd1..ead872e 100644
+--- a/scripts/tests/test-workflow-paths.py
++++ b/scripts/tests/test-workflow-paths.py
+@@ -113,6 +113,7 @@ with Path(os.environ['CHECK_LOG']).open('a') as log:
+         self.write(Path('recipe/scripts/tests/test-ap-flowtable.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-hg5585f-ppe-host-start.py'), stub)
+         self.write(Path('recipe/scripts/tests/check-npu-dma-device.py'), stub)
++        self.write(Path('recipe/scripts/tests/test-wed-txp-template.py'), stub)
+         self.write(Path('scripts/validate-build.sh'), full_validation())
+ 
+     def write(self, path, contents=''):
+diff --git a/scripts/validate-build.sh b/scripts/validate-build.sh
+index a27c681..c8c0272 100644
+--- a/scripts/validate-build.sh
++++ b/scripts/validate-build.sh
+@@ -48,6 +48,7 @@ for kernel_config in "${kernel_configs[@]}"; do
+     python3 scripts/check-hg5585f-wed-rx-irq.py --mt76 "$mt76"
+     python3 scripts/check-hg5585f-npu-input-ring.py --header "$kernel/include/linux/soc/airoha/airoha_wlan_legacy.h" --mt76 "$mt76" --firmware files/lib/firmware/airoha/en7581_MT7916_npu_rv32.bin
+     python3 "$GITHUB_WORKSPACE/scripts/tests/check-npu-dma-device.py" --source "$mt76/mt7915/mmio.c"
++    python3 "$GITHUB_WORKSPACE/scripts/tests/test-wed-txp-template.py" --mt76 "$mt76"
+     mt76_found=$((mt76_found + 1))
+   done
+   [ "$mt76_found" -gt 0 ] || {
 diff --git a/target/linux/airoha/patches-6.18/949-net-airoha-classify-wed-irqs-and-drain-faults.patch b/target/linux/airoha/patches-6.18/949-net-airoha-classify-wed-irqs-and-drain-faults.patch
 new file mode 100644
+index 0000000..9a5daaa
 --- /dev/null
 +++ b/target/linux/airoha/patches-6.18/949-net-airoha-classify-wed-irqs-and-drain-faults.patch
 @@ -0,0 +1,304 @@
