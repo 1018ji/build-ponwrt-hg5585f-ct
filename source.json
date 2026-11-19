@@ -1,11 +1,11 @@
 {
   "source_url": "https://github.com/1018ji/ponwrt.git",
-  "source_commit": "d9dd3a49f7bb7661c01e9c57c9e2aac2a1114b3e",
+  "source_commit": "f6977f2947eb355b106470354feae3d14868fbdd",
   "exported_from": "new",
   "patches": [
     {
       "name": "0001-hg5585f-platform.patch",
-      "sha256": "0f95e0b581ca4883bfabb92bd6ee88e21714be97d6bd7bd95bd3ab79670d83dc"
+      "sha256": "a87f281c12125c0a7fd770bf4947478aa8fb2babd56d81643a8b5cd15f96f36f"
     },
     {
       "name": "0002-hg5585f-offload.patch",
@@ -42,7 +42,7 @@
       "executable": false
     },
     "target/linux/airoha/image/an7581.mk": {
-      "sha256": "5fb6e934645c71d98049ae01463d80ea1f9723359d128ef311661add9249d5e9",
+      "sha256": "42f7cab35d19cf7e43aed156319f96250a45cd4e9750fa701eb6479f673eb07c",
       "executable": false
     },
     "files/etc/hotplug.d/firmware/10-mt7916-an-eeprom": {
@@ -53,14 +53,6 @@
       "sha256": "42cc36c0c55b054a26f548acf793cdf502f63c0e0e75429094a84d4ff2d7876e",
       "executable": true,
       "reviewed": true
-    },
-    "files/etc/hotplug.d/net/99-wifi-affinity": {
-      "sha256": "bb458342e14f57f14a446f3c2adeaaa636f742021454ae5a3ca78597cd3375ce",
-      "executable": true
-    },
-    "files/usr/sbin/pin-wifi-cpus.sh": {
-      "sha256": "35270d0d324b0cb011d86389f447c068caaa329afacbab6321f336ec8da80fbb",
-      "executable": true
     },
     "files/etc/Wireless/RT2860AP/SingleSKU.dat": {
       "sha256": "744d478fd6d7ecf4ff7353eee5869d4f7baafd44c4bf4577724323a3f3d38a50",
@@ -157,7 +149,7 @@
       "executable": false
     },
     "files/etc/uci-defaults/99-hg5585f-hardware": {
-      "sha256": "22948f4bdfb346dfc92c3c3b1079ef0cb864760e4140bd3f78d6115d5e471551",
+      "sha256": "9d9be82d686f8341ca8d664fe6eae931b10750fc065f5e4774fe56c89753348b",
       "executable": true,
       "reviewed": true
     },
@@ -328,7 +320,7 @@
       "executable": false
     },
     "target/linux/airoha/base-files/etc/board.d/03_pon_data": {
-      "sha256": "81d968a311069fdc4b2e6697d5f55d9aa33c8ba16f35c12e096db2ebfe697c6a",
+      "sha256": "7a1ae773239fcaeca48bd69a6373af9ec3d3f639fc898c2d775c17d2edb371ae",
       "executable": true
     },
     "package/kernel/mt76/patches/131-mt7915-airoha-batch-and-queue-stats.patch": {
