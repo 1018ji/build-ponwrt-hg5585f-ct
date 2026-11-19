@@ -17,6 +17,9 @@ def run(*arguments, cwd=None, capture=False):
                           stdout=subprocess.PIPE if capture else None)
 
 
+CHECKPOINT = '.hg5585f-source.json'
+
+
 def manifest():
     data = json.loads((ROOT/'source.json').read_text())
     assert re.fullmatch(r'[0-9a-f]{40}', data['source_commit'])
@@ -25,13 +28,45 @@ def manifest():
     for patch in data['patches']:
         assert re.fullmatch(r'[0-9]{4}-[a-z0-9-]+\.patch', patch['name'])
         assert hashlib.sha256((ROOT/'patches'/patch['name']).read_bytes()).hexdigest() == patch['sha256']
-    for name in data['files']:
-        assert not Path(name).is_absolute() and '..' not in Path(name).parts
     return data
 
 
-def matches(source, data):
-    for name, expected in data['files'].items():
+def patch_paths(data):
+    return [str(ROOT/'patches'/patch['name']) for patch in data['patches']]
+
+
+def patch_files(patches):
+    """Paths touched by the given patch files, in first-touched order."""
+    names = []
+    for patch in patches:
+        parts = run('git', 'apply', '--numstat', '-z', patch, capture=True).stdout.split('\0')
+        i = 0
+        while i < len(parts) and parts[i]:
+            path = parts[i].split('\t', 2)[2]
+            if path:
+                names.append(path)
+                i += 1
+            else:  # rename: the old and new paths follow as separate fields
+                names.extend(parts[i + 1:i + 3])
+                i += 3
+    for name in names:
+        assert not Path(name).is_absolute() and '..' not in Path(name).parts, f'Unsafe patch path: {name}'
+    return list(dict.fromkeys(names))
+
+
+def fingerprint(source, names):
+    files = {}
+    for name in sorted(names):
+        path = source/name
+        if path.is_file() and not path.is_symlink():
+            files[name] = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                           'executable': bool(path.stat().st_mode & 0o111)}
+    return files
+
+
+def matches(source, recorded):
+    """Compare patched files with the fingerprints recorded when they were applied."""
+    for name, expected in recorded['files'].items():
         path = source/name
         if not path.is_file() or path.is_symlink():
             return False
@@ -42,32 +77,52 @@ def matches(source, data):
     return True
 
 
+def same_recipe(previous, data):
+    return all(previous.get(key) == data[key] for key in ('source_url', 'source_commit', 'patches'))
+
+
+def save_checkpoint(source, data, names):
+    """Record the applied recipe plus fingerprints of the files it produced."""
+    record = dict(data, files=fingerprint(source, names))
+    (source/CHECKPOINT).write_text(json.dumps(record, indent=2, ensure_ascii=False) + '\n')
+    return record
+
+
+def stage(source, names, target):
+    for name in names:
+        path = source/name
+        if path.exists() or path.is_symlink():
+            assert path.is_file() and not path.is_symlink(), f'Unexpected source file: {name}'
+            copy = target/name
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, copy)
+
+
 def apply(source, data):
     source = source.resolve()
     assert source not in (ROOT, (ROOT.parent/'ponwrt').resolve()), 'Use an independent build checkout'
     assert run('git', 'rev-parse', '--show-toplevel', cwd=source, capture=True).stdout.strip() == str(source)
     assert run('git', 'rev-parse', 'HEAD', cwd=source, capture=True).stdout.strip() == data['source_commit'], 'Source commit differs from source.json'
-    if not matches(source, data):
-        patches = [str(ROOT/'patches'/patch['name']) for patch in data['patches']]
-        # Later patches can update files introduced by earlier patches. Replay
-        # the complete sequence on copies before changing the real checkout.
-        with tempfile.TemporaryDirectory(prefix='hg5585f-patch-check-') as temporary:
-            staged = Path(temporary)
-            for name in data['files']:
-                path = source/name
-                if path.exists():
-                    assert path.is_file() and not path.is_symlink(), f'Unexpected source file: {name}'
-                    target = staged/name
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(path, target)
-            for patch in patches:
-                run('git', 'apply', '--check', '--whitespace=nowarn', patch, cwd=staged)
-                run('git', 'apply', '--whitespace=nowarn', patch, cwd=staged)
-            assert matches(staged, data), 'Patch sequence differs from the export manifest'
+    checkpoint = source/CHECKPOINT
+    if checkpoint.is_file():
+        previous = json.loads(checkpoint.read_text())
+        if same_recipe(previous, data) and 'files' in previous and matches(source, previous):
+            print(f"PASS: pinned source already carries all {len(previous['files'])} patched files")
+            return
+    patches = patch_paths(data)
+    names = patch_files(patches)
+    # Later patches can update files introduced by earlier patches. Replay
+    # the complete sequence on copies before changing the real checkout.
+    with tempfile.TemporaryDirectory(prefix='hg5585f-patch-check-') as temporary:
+        staged = Path(temporary)
+        stage(source, names, staged)
         for patch in patches:
-            run('git', 'apply', '--whitespace=nowarn', patch, cwd=source)
-    assert matches(source, data), 'Patched files differ from the export manifest'
-    print(f"PASS: pinned source and all {len(data['files'])} exported files verified")
+            run('git', 'apply', '--check', '--whitespace=nowarn', patch, cwd=staged)
+            run('git', 'apply', '--whitespace=nowarn', patch, cwd=staged)
+    for patch in patches:
+        run('git', 'apply', '--whitespace=nowarn', patch, cwd=source)
+    record = save_checkpoint(source, data, names)
+    print(f"PASS: pinned source patched; {len(record['files'])} files recorded")
 
 
 def config(path, kernel=False):

@@ -41,8 +41,8 @@ class IncrementalSource(unittest.TestCase):
         self.old = {'source_url': 'fixture', 'source_commit': self.commit,
                     'patches': self.patches[:1],
                     'files': {'export.txt': self.file_info(b'one\n')}}
-        self.current = dict(self.old, patches=self.patches,
-                            files={'export.txt': self.file_info(b'two\n')})
+        self.current = {k: v for k, v in self.old.items() if k != 'files'}
+        self.current['patches'] = self.patches
         self.previous = self.source/'.hg5585f-source.json'
         self.previous.write_text(json.dumps(self.old))
         (self.source.parent/'recipe').mkdir()
@@ -88,6 +88,20 @@ class IncrementalSource(unittest.TestCase):
         self.assertEqual(self.cache.stat().st_ino, self.cache_stat.st_ino)
         self.assertEqual(self.cache.stat().st_mtime_ns, self.cache_stat.st_mtime_ns)
 
+    def test_upgrade_records_the_applied_recipe_in_the_checkpoint(self):
+        self.assertEqual(self.upgrade().returncode, 0)
+        record = json.loads(self.previous.read_text())
+        self.assertEqual(record['patches'], self.patches)
+        self.assertEqual(record['files'], {'export.txt': self.file_info(b'two\n')})
+        self.assertNotIn('files', json.loads((self.recipe/'source.json').read_text()))
+
+    def test_source_without_applied_file_record_is_rejected(self):
+        self.previous.write_text(json.dumps(self.current))
+        result = self.upgrade()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('no applied-file record', result.stderr)
+        self.assert_original_untouched()
+
     def test_already_upgraded_source_can_be_retried_with_old_checkpoint(self):
         self.assertEqual(self.upgrade().returncode, 0)
         result = self.upgrade()
@@ -117,14 +131,6 @@ class IncrementalSource(unittest.TestCase):
         result = self.upgrade()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Cannot fetch source commit', result.stderr)
-        self.assert_original_untouched()
-
-    def test_manifest_mismatch_fails_before_mutating_original_source(self):
-        self.current['files'] = {'export.txt': self.file_info(b'unexpected\n')}
-        self.save_current()
-        result = self.upgrade()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('differs from the current manifest', result.stderr)
         self.assert_original_untouched()
 
     def test_select_recognizes_old_recipe_and_checkpoint(self):
@@ -196,7 +202,8 @@ class SourceCommitSwitch(unittest.TestCase):
         info = lambda data: {'sha256': self.sha(data), 'executable': False}
         self.old = {'source_url': url, 'source_commit': self.first, 'patches': self.old_patches,
                     'files': {'export.txt': info(b'one\n'), 'sub/new.txt': info(b'created\n')}}
-        self.current = dict(self.old, source_commit=self.second, patches=self.new_patches)
+        self.current = {k: v for k, v in self.old.items() if k != 'files'}
+        self.current.update(source_commit=self.second, patches=self.new_patches)
         self.previous = self.source/'.hg5585f-source.json'
         self.previous.write_text(json.dumps(self.old))
         (self.recipe/'source.json').write_text(json.dumps(self.current))
@@ -223,8 +230,12 @@ class SourceCommitSwitch(unittest.TestCase):
         self.assertEqual((self.source/'sub/new.txt').read_text(), 'created\n')
         self.assertEqual(self.cache.stat().st_ino, self.cache_stat.st_ino)
         self.assertEqual(self.cache.stat().st_mtime_ns, self.cache_stat.st_mtime_ns)
+        record = json.loads(self.previous.read_text())
+        self.assertEqual(record['source_commit'], self.second)
+        self.assertEqual(sorted(record['files']), ['export.txt', 'sub/new.txt'])
         retry = self.upgrade()
         self.assertEqual(retry.returncode, 0, retry.stdout+retry.stderr)
+        self.assertIn('already matches', retry.stdout)
 
     def test_patch_that_no_longer_applies_leaves_tree_untouched(self):
         (self.recipe/'patches/0001-edit.patch').write_bytes(

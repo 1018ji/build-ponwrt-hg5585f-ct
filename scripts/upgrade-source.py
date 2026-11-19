@@ -3,14 +3,13 @@
 import argparse
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 
-from prepare import apply as apply_recipe, manifest, matches, run
+from prepare import (CHECKPOINT, apply as apply_recipe, manifest, matches, patch_files,
+                     patch_paths, run, same_recipe, save_checkpoint, stage)
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKPOINT = '.hg5585f-source.json'
 
 
 def compatible(previous, current):
@@ -54,6 +53,7 @@ def switch_commit(source, previous, current):
     head = git_output(source, 'rev-parse', 'HEAD').strip()
     assert head == previous['source_commit'], \
         'Existing source does not match the commit recorded by its previous recipe'
+    assert 'files' in previous, 'Existing source has no applied-file record; use a fresh build tree'
     for name in previous['files']:
         assert not Path(name).is_absolute() and '..' not in Path(name).parts
     assert matches(source, previous), \
@@ -73,10 +73,11 @@ def switch_commit(source, previous, current):
     added = git_names(source, 'diff', '--name-only', '--diff-filter=A', 'HEAD', 'FETCH_HEAD')
     blocked = sorted(name for name in added if name not in old_files and (source/name).exists())
     assert not blocked, f'Untracked files collide with the new source commit: {blocked}'
-    patches = [str(ROOT/'patches'/patch['name']) for patch in current['patches']]
+    patches = patch_paths(current)
+    names = patch_files(patches)
     with tempfile.TemporaryDirectory(prefix='hg5585f-switch-check-') as temporary:
         staged = Path(temporary)
-        listing = git_output(source, 'ls-tree', '-z', 'FETCH_HEAD', '--', *current['files'])
+        listing = git_output(source, 'ls-tree', '-z', 'FETCH_HEAD', '--', *names)
         for entry in filter(None, listing.split('\0')):
             info, name = entry.split('\t', 1)
             mode, kind, _ = info.split()
@@ -89,7 +90,6 @@ def switch_commit(source, previous, current):
         for patch in patches:
             run('git', 'apply', '--check', '--whitespace=nowarn', patch, cwd=staged)
             run('git', 'apply', '--whitespace=nowarn', patch, cwd=staged)
-        assert matches(staged, current), 'Patch sequence differs from the export manifest on the new commit'
     tracked = []
     for name in sorted(old_files):
         known = subprocess.run(['git', 'cat-file', '-e', f'HEAD:{name}'], cwd=source,
@@ -116,10 +116,10 @@ def upgrade(source, path, current):
     if git_output(source, 'rev-parse', 'HEAD').strip() != current['source_commit']:
         switch_commit(source, previous, current)
         return
-    # A squash/rebase can replace the patch history while leaving the exported
-    # source identical. Reuse that tree without replaying an incompatible
-    # historical prefix; stale trees still go through the strict check below.
-    if matches(source, current):
+    assert 'files' in previous, 'Existing source has no applied-file record; use a fresh build tree'
+    if same_recipe(previous, current):
+        assert matches(source, previous), \
+            'Existing exported files differ from the previous recipe; refusing to overwrite changes'
         print('PASS: existing source already matches the current recipe')
         return
     assert compatible(previous, current), \
@@ -130,24 +130,18 @@ def upgrade(source, path, current):
         'Existing exported files differ from the previous recipe; refusing to overwrite changes'
     patches = current['patches'][len(previous['patches']):]
     assert patches, 'Recipe files changed without appending a patch; use a separate build tree'
+    paths = [str(ROOT/'patches'/patch['name']) for patch in patches]
+    names = set(previous['files']) | set(patch_files(paths))
     with tempfile.TemporaryDirectory(prefix='hg5585f-incremental-check-') as temporary:
         staged = Path(temporary)
-        for name in set(previous['files']) | set(current['files']):
-            path = source/name
-            if path.exists() or path.is_symlink():
-                assert path.is_file() and not path.is_symlink(), f'Unexpected source file: {name}'
-                target = staged/name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
-        for patch in patches:
-            patch_path = ROOT/'patches'/patch['name']
-            run('git', 'apply', '--check', '--whitespace=nowarn', str(patch_path), cwd=staged)
-            run('git', 'apply', '--whitespace=nowarn', str(patch_path), cwd=staged)
-        assert matches(staged, current), 'Incremental patch result differs from the current manifest'
-    for patch in patches:
+        stage(source, names, staged)
+        for patch in paths:
+            run('git', 'apply', '--check', '--whitespace=nowarn', patch, cwd=staged)
+            run('git', 'apply', '--whitespace=nowarn', patch, cwd=staged)
+    for patch, path in zip(patches, paths):
         print('Applying additional patch: ' + patch['name'], flush=True)
-        run('git', 'apply', '--whitespace=nowarn', str(ROOT/'patches'/patch['name']), cwd=source)
-    assert matches(source, current), 'Incremental source differs from the current manifest'
+        run('git', 'apply', '--whitespace=nowarn', path, cwd=source)
+    save_checkpoint(source, current, names)
     print(f'PASS: applied {len(patches)} additional patches in the original source directory')
 
 

@@ -126,7 +126,7 @@ if [ ! -d "$source" ]; then
 else
   step 'Apply only newly appended source patches' python3 "$recipe/scripts/upgrade-source.py" apply "$source" "$source/.hg5585f-source.json"
 fi
-cp "$recipe/source.json" "$source/.hg5585f-source.json"
+# prepare.py and upgrade-source.py record the applied recipe in .hg5585f-source.json.
 cd "$source"
 step 'Check exported HG5585F patch bundle' python3 scripts/check-hg5585f-offload.py
 if [ ! -e dl ]; then step 'Link persistent package download cache' ln -s /workdir/dl dl; fi
