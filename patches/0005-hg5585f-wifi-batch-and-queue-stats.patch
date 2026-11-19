@@ -1,0 +1,632 @@
+From: PonWrt developers <noreply@localhost>
+Subject: [PATCH] HG5585F: batch RX, initialize WED flow control and count queues
+
+Add transient stats-on/stats-off commands without enabling firmware logs.
+Snapshot CPU/thread counters and the shared offload statistics once for
+both PHYs. Keep the existing recipe prefix for incremental builds.
+
+Signed-off-by: PonWrt developers <noreply@localhost>
+---
+diff --git a/files/usr/sbin/hg5585f-wifi-diag b/files/usr/sbin/hg5585f-wifi-diag
+--- a/files/usr/sbin/hg5585f-wifi-diag
++++ b/files/usr/sbin/hg5585f-wifi-diag
+@@ -4,6 +4,25 @@
+ umask 077
+ 
+ parameter=/sys/module/airoha_npu/parameters/wlan_debug
++
++stats_runtime() {
++	for path in /sys/kernel/debug/ieee80211/phy*/mt76/offload_stats; do
++		[ -r "$path" ] || continue
++		awk '$1 == "enabled:" { print $2; found = 1; exit }
++		     END { if (!found) print "unavailable" }' "$path"
++		return
++	done
++	echo unavailable
++}
++
++apply_stats() {
++	for path in /sys/kernel/debug/ieee80211/phy*/mt76/offload_stats; do
++		[ -w "$path" ] || continue
++		printf '%s\n' "$1" > "$path" || return 1
++		# Both PHYs share the same counters and switch.
++		break
++	done
++}
+ 
+ fw_log_paths() {
+ 	for path in /sys/kernel/debug/ieee80211/phy*/mt76/fw_debug_wa \
+@@ -50,7 +69,23 @@
+ 	for path in $(fw_log_paths); do
+ 		printf '%s\n' "$1" > "$path" || return 1
+ 	done
++	apply_stats "$1"
+ 	logger -t hg5585f-wifi "component=diag event=debug enabled=$1" || true
++}
++
++thread_stats() {
++	for entry in /proc/[0-9]*/comm; do
++		read -r name < "$entry" 2>/dev/null || continue
++		case "$name" in
++			napi/*|mt76*|ksoftirqd/*)
++				pid=${entry#/proc/}
++				pid=${pid%/comm}
++				cat "/proc/$pid/stat" 2>/dev/null || continue
++				taskset -p "$pid" 2>/dev/null || true
++				sed -n '/se.nr_migrations /p; /nr_switches /p' "/proc/$pid/sched" 2>/dev/null || true
++				;;
++		esac
++	done
+ }
+ 
+ capture() {
+@@ -66,8 +101,10 @@
+ 		"$(configured)" "$(runtime)" "$(fw_log_runtime wa)" "$(fw_log_runtime wm)"
+ 	capture kernel uname -a
+ 	capture uptime cat /proc/uptime
++	capture cpu cat /proc/stat
+ 	capture interrupts cat /proc/interrupts
+ 	capture softirqs cat /proc/softirqs
++	capture mt76_threads thread_stats
+ 	capture deferred_devices cat /sys/kernel/debug/devices_deferred
+ 	capture pci lspci -nnk
+ 	capture radios iw dev
+@@ -93,6 +130,11 @@
+ 		# Both PHYs share the same counters and device instance.
+ 		break
+ 	done
++	for path in /sys/kernel/debug/ieee80211/phy*/mt76/offload_stats; do
++		[ -r "$path" ] || continue
++		capture "$path" cat "$path"
++		break
++	done
+ 	for path in /sys/kernel/debug/airoha-wed /sys/kernel/debug/ppe/config /sys/kernel/debug/ppe/accounting; do
+ 		[ ! -r "$path" ] || capture "$path" cat "$path"
+ 	done
+@@ -109,7 +151,7 @@
+ }
+ 
+ usage() {
+-	echo "Usage: $0 {on|off|status|snapshot|collect [seconds:1-60]}" >&2
++	echo "Usage: $0 {on|off|stats-on|stats-off|status|snapshot|collect [seconds:1-60]}" >&2
+ 	exit 2
+ }
+ 
+@@ -129,13 +171,24 @@
+ 		[ "$#" -eq 1 ] || usage
+ 		apply_runtime "$(configured)"
+ 		;;
++	stats-on|stats-off)
++		[ "$#" -eq 1 ] || usage
++		[ "$(stats_runtime)" != unavailable ] || {
++			echo 'Offload statistics are unavailable' >&2
++			exit 1
++		}
++		enabled=0
++		[ "$command" != stats-on ] || enabled=1
++		apply_stats "$enabled"
++		printf 'hg5585f-wifi: component=diag event=stats enabled=%s persistent=0\n' "$enabled"
++		;;
+ 	runtime-off)
+ 		[ "$#" -eq 1 ] || usage
+ 		apply_runtime 0
+ 		;;
+ 	status)
+ 		[ "$#" -le 1 ] || usage
+-		printf 'hg5585f-wifi: component=diag event=status configured=%s runtime=%s\n' "$(configured)" "$(runtime)"
++		printf 'hg5585f-wifi: component=diag event=status configured=%s runtime=%s stats=%s\n' "$(configured)" "$(runtime)" "$(stats_runtime)"
+ 		;;
+ 	snapshot)
+ 		[ "$#" -eq 1 ] || usage
+diff --git a/package/kernel/mt76/Makefile b/package/kernel/mt76/Makefile
+--- a/package/kernel/mt76/Makefile
++++ b/package/kernel/mt76/Makefile
+@@ -1,7 +1,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=mt76
+-PKG_RELEASE:=6
++PKG_RELEASE:=7
+ 
+ PKG_LICENSE:=BSD-3-Clause-Clear
+ PKG_LICENSE_FILES:=
+diff --git a/package/kernel/mt76/patches/131-mt7915-airoha-batch-and-queue-stats.patch b/package/kernel/mt76/patches/131-mt7915-airoha-batch-and-queue-stats.patch
+new file mode 100644
+--- /dev/null
++++ b/package/kernel/mt76/patches/131-mt7915-airoha-batch-and-queue-stats.patch
+@@ -0,0 +1,495 @@
++From: PonWrt developers <noreply@localhost>
++Subject: [PATCH] mt76: batch HG5585F RX and expose optional queue counters
++
++Flush legacy NPU host-return packets once per poll, while keeping the
++original descriptor publication and retirement protocol intact.
++
++Match the stock MT7916 CTXD ring 18/19 and TX flow-control initialization
++only for Airoha WED. The same sequence is used by the reference commit
++below and is present in HG5585F stock hif_init_WFDMA.
++
++Expose cumulative host IRQ, NAPI batch and TX-free counters through
++an offload_stats file. Collection is disabled by default, independently
++of firmware logging. Reading statistics never touches hardware.
++
++Link: https://github.com/Sirherobrine23/mt76/commit/a8bd53606ce095d727bde4a572028dbe521b8d08
++Signed-off-by: PonWrt developers <noreply@localhost>
++---
++diff --git a/dma.c b/dma.c
++--- a/dma.c
+++++ b/dma.c
++@@ -1135,6 +1135,7 @@
++ 
++ 	rcu_read_unlock();
++ 
+++	mt76_rx_poll_stats_record(dev, qid, done, budget);
++ 	if (done < budget && napi_complete(napi))
++ 		dev->drv->rx_poll_complete(dev, qid);
++ 
++diff --git a/mt76.h b/mt76.h
++--- a/mt76.h
+++++ b/mt76.h
++@@ -242,6 +242,15 @@
++ 	u32 dma_idx;
++ } __packed __aligned(4);
++ 
+++struct mt76_rx_poll_stats {
+++	atomic64_t irqs;
+++	atomic64_t polls;
+++	atomic64_t empty;
+++	atomic64_t budget_full;
+++	atomic64_t work;
+++	atomic64_t max_batch;
+++};
+++
++ struct mt76_queue {
++ 	struct mt76_queue_regs __iomem *regs;
++ 
++@@ -275,6 +284,7 @@
++ 	dma_addr_t desc_dma;
++ 	struct sk_buff *rx_head;
++ 	struct page_pool *page_pool;
+++	struct mt76_rx_poll_stats poll_stats;
++ };
++ 
++ struct mt76_mcu_ops {
++@@ -980,6 +990,8 @@
++ 	struct napi_struct napi[__MT_RXQ_MAX];
++ 	struct sk_buff_head rx_skb[__MT_RXQ_MAX];
++ 	struct tasklet_struct irq_tasklet;
+++	/* Transient counters only; independent of firmware/lifecycle logging. */
+++	bool offload_stats_enabled;
++ 
++ 	struct list_head txwi_cache;
++ 	struct list_head rxwi_cache;
++@@ -1831,6 +1843,30 @@
++ }
++ #endif /* CONFIG_MT76_NPU */
++ 
+++static inline bool mt76_offload_stats_enabled(struct mt76_dev *dev)
+++{
+++	return unlikely(READ_ONCE(dev->offload_stats_enabled));
+++}
+++
+++static inline void
+++mt76_rx_poll_stats_record(struct mt76_dev *dev, enum mt76_rxq_id qid,
+++			  int done, int budget)
+++{
+++	struct mt76_rx_poll_stats *stats = &dev->q_rx[qid].poll_stats;
+++
+++	if (!mt76_offload_stats_enabled(dev))
+++		return;
+++	/* One NAPI poller owns this queue; the reader never resets counters. */
+++	atomic64_inc(&stats->polls);
+++	atomic64_add(done, &stats->work);
+++	if (!done)
+++		atomic64_inc(&stats->empty);
+++	if (done == budget)
+++		atomic64_inc(&stats->budget_full);
+++	if (done > atomic64_read(&stats->max_batch))
+++		atomic64_set(&stats->max_batch, done);
+++}
+++
++ static inline bool mt76_wed_is_airoha(struct mt76_dev *dev)
++ {
++ #ifdef CONFIG_NET_MEDIATEK_SOC_WED
++diff --git a/npu.c b/npu.c
++--- a/npu.c
+++++ b/npu.c
++@@ -180,11 +180,18 @@
++ 		}
++ 
++ 		dev->drv->rx_skb(dev, qid, skb, &info);
+++		if (!dev->mmio.npu_legacy_rx)
+++			mt76_rx_poll_complete(dev, qid, napi);
+++		done++;
+++	}
+++
+++	/* Flush the legacy host-return batch once, like the native DMA poller.
+++	 * Descriptor publication/retirement stays in the transport unchanged.
+++	 */
+++	if (dev->mmio.npu_legacy_rx)
++ 		mt76_rx_poll_complete(dev, qid, napi);
++-		done++;
++-	}
++-
++ 	mt76_npu_fill_rx_queue(dev, &dev->q_rx[qid]);
+++	mt76_rx_poll_stats_record(dev, qid, done, budget);
++ 	if (dev->mmio.npu_legacy_rx) {
++ 		if (done != errors)
++ 			atomic64_add(done - errors, &dev->mmio.npu_rx_host_packets);
++@@ -220,6 +227,8 @@
++ 	status = airoha_npu_wlan_get_irq_status(npu, index);
++ 	if (!status)
++ 		goto out;
+++	if (mt76_offload_stats_enabled(dev))
+++		atomic64_inc(&q->poll_stats.irqs);
++ 	airoha_npu_wlan_set_irq_status(npu, status);
++ 
++ 	airoha_npu_wlan_disable_irq(npu, index);
++diff --git a/mt7915/debugfs.c b/mt7915/debugfs.c
++--- a/mt7915/debugfs.c
+++++ b/mt7915/debugfs.c
++@@ -3,6 +3,7 @@
++ 
++ #include <linux/relay.h>
++ #include <linux/regmap.h>
+++#include <linux/sched.h>
++ 
++ #include "mt7915.h"
++ #include "eeprom.h"
++@@ -1341,6 +1342,107 @@
++ }
++ DEFINE_SHOW_ATTRIBUTE(mt7915_offload_status);
++ 
+++static void mt7915_offload_stat(struct seq_file *s, const char *name,
+++			       atomic64_t *counter)
+++{
+++	seq_printf(s, "%s: %llu\n", name,
+++		   (unsigned long long)atomic64_read(counter));
+++}
+++
+++static int mt7915_offload_stats_show(struct seq_file *s, void *data)
+++{
+++	static const char * const names[__MT_RXQ_MAX] = {
+++		[MT_RXQ_MAIN] = "data0",
+++		[MT_RXQ_MCU] = "mcu",
+++		[MT_RXQ_MCU_WA] = "wa",
+++		[MT_RXQ_BAND1] = "data1",
+++		[MT_RXQ_BAND1_WA] = "band1-wa",
+++		[MT_RXQ_MAIN_WA] = "main-wa",
+++		[MT_RXQ_NPU0] = "npu0",
+++		[MT_RXQ_NPU1] = "npu1",
+++	};
+++	struct mt7915_phy *phy = s->private;
+++	struct mt7915_dev *dev = phy->dev;
+++	struct mt76_dev *mdev = &dev->mt76;
+++	struct mt7915_offload_stats *stats = &dev->offload_stats;
+++	int i;
+++
+++	seq_puts(s, "format: hg5585f-offload-stats-v1\n");
+++	seq_printf(s, "enabled: %u\n", mt76_offload_stats_enabled(mdev));
+++	seq_puts(s, "view: cumulative-host-counters\nrx_work_unit: napi-budget\n");
+++	mt7915_offload_stat(s, "wed_irqs", &stats->wed_irqs);
+++	mt7915_offload_stat(s, "native_irqs", &stats->native_irqs);
+++	mt7915_offload_stat(s, "tasklets", &stats->tasklets);
+++	mt7915_offload_stat(s, "empty_tasklets", &stats->empty_tasklets);
+++	mt7915_offload_stat(s, "irq_enables", &stats->irq_enables);
+++	mt7915_offload_stat(s, "txfree_messages", &stats->txfree_messages);
+++	mt7915_offload_stat(s, "txfree_tokens", &stats->txfree_tokens);
+++	mt7915_offload_stat(s, "txfree_host_tokens", &stats->txfree_host_tokens);
+++	mt7915_offload_stat(s, "txfree_without_host_tokens",
+++			     &stats->txfree_without_host_tokens);
+++	for (i = 0; i < 32; i++) {
+++		seq_printf(s, "irq_bit: %d wed=%llu native=%llu hif2=%llu\n", i,
+++			   (unsigned long long)atomic64_read(&stats->wed_bits[i]),
+++			   (unsigned long long)atomic64_read(&stats->native_bits[i]),
+++			   (unsigned long long)atomic64_read(&stats->hif2_bits[i]));
+++	}
+++	/* Software counters remain readable during quarantine; no MMIO here. */
+++	mt76_for_each_q_rx(mdev, i) {
+++		struct mt76_queue *q = &mdev->q_rx[i];
+++		struct mt76_rx_poll_stats *p = &q->poll_stats;
+++		struct task_struct *thread;
+++		int pid;
+++
+++		rcu_read_lock();
+++		thread = READ_ONCE(mdev->napi[i].thread);
+++		pid = thread ? task_pid_nr(thread) : 0;
+++		rcu_read_unlock();
+++		seq_printf(s, "rx_queue: %d name=%s flags=%04x napi_thread=%d irqs=%llu polls=%llu empty=%llu budget_full=%llu work=%llu max_batch=%llu\n",
+++			   i, names[i] ?: "other", READ_ONCE(q->flags), pid,
+++			   (unsigned long long)atomic64_read(&p->irqs),
+++			   (unsigned long long)atomic64_read(&p->polls),
+++			   (unsigned long long)atomic64_read(&p->empty),
+++			   (unsigned long long)atomic64_read(&p->budget_full),
+++			   (unsigned long long)atomic64_read(&p->work),
+++			   (unsigned long long)atomic64_read(&p->max_batch));
+++	}
+++	return 0;
+++}
+++
+++static int mt7915_offload_stats_open(struct inode *inode, struct file *file)
+++{
+++	return single_open(file, mt7915_offload_stats_show, inode->i_private);
+++}
+++
+++static ssize_t mt7915_offload_stats_write(struct file *file,
+++					const char __user *buffer,
+++					size_t count, loff_t *ppos)
+++{
+++	struct seq_file *s = file->private_data;
+++	struct mt7915_phy *phy = s->private;
+++	struct mt76_dev *mdev = &phy->dev->mt76;
+++	bool enabled;
+++	int err;
+++
+++	err = kstrtobool_from_user(buffer, count, &enabled);
+++	if (err)
+++		return err;
+++	if (enabled && !mdev->mmio.npu_legacy_rx && !mt76_wed_is_airoha(mdev))
+++		return -EOPNOTSUPP;
+++	/* No reset: toggling cannot race a counter reset with the hot path. */
+++	WRITE_ONCE(mdev->offload_stats_enabled, enabled);
+++	return count;
+++}
+++
+++static const struct file_operations mt7915_offload_stats_fops = {
+++	.owner = THIS_MODULE,
+++	.open = mt7915_offload_stats_open,
+++	.read = seq_read,
+++	.write = mt7915_offload_stats_write,
+++	.llseek = seq_lseek,
+++	.release = single_release,
+++};
+++
++ int mt7915_init_debugfs(struct mt7915_phy *phy)
++ {
++ 	struct mt7915_dev *dev = phy->dev;
++@@ -1362,6 +1464,7 @@
++ 	debugfs_create_file("fw_debug_wm", 0600, dir, dev, &fops_fw_debug_wm);
++ 	debugfs_create_file("fw_debug_wa", 0600, dir, dev, &fops_fw_debug_wa);
++ 	debugfs_create_file("offload_status", 0400, dir, phy, &mt7915_offload_status_fops);
+++	debugfs_create_file("offload_stats", 0600, dir, phy, &mt7915_offload_stats_fops);
++ 	debugfs_create_file("fw_debug_bin", 0600, dir, dev, &fops_fw_debug_bin);
++ 	debugfs_create_file("fw_util_wm", 0400, dir, dev,
++ 			    &mt7915_fw_util_wm_fops);
++diff --git a/mt7915/dma.c b/mt7915/dma.c
++--- a/mt7915/dma.c
+++++ b/mt7915/dma.c
++@@ -408,6 +408,22 @@
++ 		if (ret)
++ 			return ret;
++ 
+++		/* HG5585F stock hif_init_WFDMA selects CTXD rings 18/19 and
+++		 * enables TX flow control before accepting WED descriptors.
+++		 */
+++		if (is_mt7916(mdev) && mt76_wed_is_airoha(mdev)) {
+++			mt76_rmw(dev, MT_WFDMA0_CTXD_CFG,
+++				 MT_WFDMA0_CTXD_CASCADE_NUM |
+++				 MT_WFDMA0_CTXD_BAND1_RING |
+++				 MT_WFDMA0_CTXD_BAND0_RING,
+++				 FIELD_PREP(MT_WFDMA0_CTXD_BAND1_RING, 19) |
+++				 MT_WFDMA0_CTXD_BAND1_EN |
+++				 FIELD_PREP(MT_WFDMA0_CTXD_BAND0_RING, 18) |
+++				 MT_WFDMA0_CTXD_BAND0_EN);
+++			mt76_set(dev, MT_WFDMA0_GLO_CFG_EXT1,
+++				 MT_WFDMA0_GLO_CFG_EXT1_TX_FCTRL);
+++		}
+++
++ 		mtk_wed_device_start(&dev->mt76.mmio.wed, wed_irq_mask);
++ #ifdef CONFIG_NET_MEDIATEK_SOC_WED
++ 		if (!dev->mt76.mmio.wed.running) {
++diff --git a/mt7915/mac.c b/mt7915/mac.c
++--- a/mt7915/mac.c
+++++ b/mt7915/mac.c
++@@ -881,6 +881,19 @@
++ }
++ 
++ static void
+++mt7915_offload_txfree_record(struct mt7915_dev *dev, unsigned int tokens,
+++			    unsigned int host_tokens)
+++{
+++	struct mt7915_offload_stats *stats = &dev->offload_stats;
+++
+++	atomic64_inc(&stats->txfree_messages);
+++	atomic64_add(tokens, &stats->txfree_tokens);
+++	atomic64_add(host_tokens, &stats->txfree_host_tokens);
+++	if (!host_tokens)
+++		atomic64_inc(&stats->txfree_without_host_tokens);
+++}
+++
+++static void
++ mt7915_mac_tx_free(struct mt7915_dev *dev, void *data, int len)
++ {
++ 	struct mt76_connac_tx_free *free = data;
++@@ -892,6 +905,8 @@
++ 	LIST_HEAD(free_list);
++ 	void *end = data + len;
++ 	bool v3, wake = false;
+++	bool stats = mt76_offload_stats_enabled(mdev);
+++	unsigned int host_tokens = 0;
++ 	u16 total, count = 0;
++ 	u32 txd = le32_to_cpu(free->txd);
++ 	__le32 *cur_info;
++@@ -966,10 +981,13 @@
++ 			if (!txwi)
++ 				continue;
++ 
+++			host_tokens++;
++ 			mt76_connac2_txwi_free(mdev, txwi, sta, &free_list);
++ 		}
++ 	}
++ 
+++	if (stats)
+++		mt7915_offload_txfree_record(dev, count, host_tokens);
++ 	mt7915_mac_tx_free_done(dev, &free_list, wake);
++ }
++ 
++@@ -982,6 +1000,8 @@
++ 	void *end = data + len;
++ 	LIST_HEAD(free_list);
++ 	bool wake = false;
+++	bool stats = mt76_offload_stats_enabled(mdev);
+++	unsigned int host_tokens = 0;
++ 	u8 i, count;
++ 
++ 	if (mt76_wed_is_airoha(mdev) && airoha_wlan_debug_enabled())
++@@ -1002,9 +1022,12 @@
++ 		if (!txwi)
++ 			continue;
++ 
+++		host_tokens++;
++ 		mt76_connac2_txwi_free(mdev, txwi, NULL, &free_list);
++ 	}
++ 
+++	if (stats)
+++		mt7915_offload_txfree_record(dev, count, host_tokens);
++ 	mt7915_mac_tx_free_done(dev, &free_list, wake);
++ }
++ 
++diff --git a/mt7915/mmio.c b/mt7915/mmio.c
++--- a/mt7915/mmio.c
+++++ b/mt7915/mmio.c
++@@ -886,17 +886,32 @@
++ }
++ 
++ /* TODO: support 2/4/6/8 MSI-X vectors */
+++static void mt7915_offload_count_bits(atomic64_t *counters, u32 status)
+++{
+++	while (status) {
+++		unsigned int bit = __ffs(status);
+++
+++		atomic64_inc(&counters[bit]);
+++		status &= status - 1;
+++	}
+++}
+++
++ static void mt7915_irq_tasklet(struct tasklet_struct *t)
++ {
++ 	struct mt7915_dev *dev = from_tasklet(dev, t, mt76.irq_tasklet);
++ 	struct mtk_wed_device *wed = &dev->mt76.mmio.wed;
+++	bool stats = mt76_offload_stats_enabled(&dev->mt76);
++ 	u32 intr, intr1, mask;
++ 
+++	if (stats)
+++		atomic64_inc(&dev->offload_stats.tasklets);
++ 	if (mtk_wed_device_active(wed)) {
++ 		mtk_wed_device_irq_set_mask(wed, 0);
++ 		if (dev->hif2)
++ 			mt76_wr(dev, MT_INT1_MASK_CSR, 0);
++ 		intr = mtk_wed_device_irq_get(wed, dev->mt76.mmio.irqmask);
+++		if (stats)
+++			mt7915_offload_count_bits(dev->offload_stats.wed_bits, intr);
++ 		if (mt76_wed_is_airoha(&dev->mt76)) {
++ 			u32 native;
++ 
++@@ -904,6 +919,9 @@
++ 			native = mt76_rr(dev, MT_INT_SOURCE_CSR) &
++ 				 mt7915_airoha_native_irq_mask(dev->mt76.mmio.irqmask);
++ 			mt76_wr(dev, MT_INT_SOURCE_CSR, native);
+++			if (stats)
+++				mt7915_offload_count_bits(dev->offload_stats.native_bits,
+++						 native);
++ 			intr |= mt7915_airoha_native_irq_status(dev, native);
++ 		}
++ 	} else {
++@@ -914,17 +932,23 @@
++ 		intr = mt76_rr(dev, MT_INT_SOURCE_CSR);
++ 		intr &= dev->mt76.mmio.irqmask;
++ 		mt76_wr(dev, MT_INT_SOURCE_CSR, intr);
+++		if (stats)
+++			mt7915_offload_count_bits(dev->offload_stats.native_bits, intr);
++ 	}
++ 
++ 	if (dev->hif2) {
++ 		intr1 = mt76_rr(dev, MT_INT1_SOURCE_CSR);
++ 		intr1 &= dev->mt76.mmio.irqmask;
++ 		mt76_wr(dev, MT_INT1_SOURCE_CSR, intr1);
+++		if (stats)
+++			mt7915_offload_count_bits(dev->offload_stats.hif2_bits, intr1);
++ 
++ 		intr |= intr1;
++ 	}
++ 
++ 	trace_dev_irq(&dev->mt76, intr, dev->mt76.mmio.irqmask);
+++	if (stats && !intr)
+++		atomic64_inc(&dev->offload_stats.empty_tasklets);
++ 
++ 	mask = intr & MT_INT_RX_DONE_ALL;
++ 	if (intr & MT_INT_TX_DONE_MCU)
++@@ -981,6 +1005,12 @@
++ 	if (!test_bit(MT76_STATE_INITIALIZED, &dev->mphy.state))
++ 		return IRQ_NONE;
++ 
+++	if (mt76_offload_stats_enabled(&dev->mt76)) {
+++		if (irq == dev->wed_irq_num)
+++			atomic64_inc(&dev->offload_stats.wed_irqs);
+++		else
+++			atomic64_inc(&dev->offload_stats.native_irqs);
+++	}
++ 	tasklet_schedule(&dev->mt76.irq_tasklet);
++ 
++ 	return IRQ_HANDLED;
++diff --git a/mt7915/mt7915.h b/mt7915/mt7915.h
++--- a/mt7915/mt7915.h
+++++ b/mt7915/mt7915.h
++@@ -256,6 +256,21 @@
++ #endif
++ };
++ 
+++struct mt7915_offload_stats {
+++	atomic64_t wed_irqs;
+++	atomic64_t native_irqs;
+++	atomic64_t tasklets;
+++	atomic64_t empty_tasklets;
+++	atomic64_t irq_enables;
+++	atomic64_t txfree_messages;
+++	atomic64_t txfree_tokens;
+++	atomic64_t txfree_host_tokens;
+++	atomic64_t txfree_without_host_tokens;
+++	atomic64_t wed_bits[32];
+++	atomic64_t native_bits[32];
+++	atomic64_t hif2_bits[32];
+++};
+++
++ struct mt7915_dev {
++ 	union { /* must be first */
++ 		struct mt76_dev mt76;
++@@ -272,6 +287,7 @@
++ 	int pci_irq_num;
++ 	int wed_irq_num;
++ 	bool npu_ppe_forwarding;
+++	struct mt7915_offload_stats offload_stats;
++ 	struct mt7915_reg_desc reg;
++ 	u8 q_id[MT7915_MAX_QUEUE];
++ 	u32 q_int_mask[MT7915_MAX_QUEUE];
++@@ -609,6 +625,8 @@
++ 
++ static inline void mt7915_irq_enable(struct mt7915_dev *dev, u32 mask)
++ {
+++	if (mt76_offload_stats_enabled(&dev->mt76))
+++		atomic64_inc(&dev->offload_stats.irq_enables);
++ 	if (dev->hif2 || mt76_wed_is_airoha(&dev->mt76))
++ 		mt7915_dual_hif_set_irq_mask(dev, false, 0, mask);
++ 	else
++diff --git a/mt7915/regs.h b/mt7915/regs.h
++--- a/mt7915/regs.h
+++++ b/mt7915/regs.h
++@@ -604,6 +604,16 @@
++ #define MT_WFDMA0_EXT0_CFG		MT_WFDMA0(0x2b0)
++ #define MT_WFDMA0_EXT0_RXWB_KEEP	BIT(10)
++ 
+++#define MT_WFDMA0_GLO_CFG_EXT1		MT_WFDMA0(0x2b4)
+++#define MT_WFDMA0_GLO_CFG_EXT1_TX_FCTRL	BIT(28)
+++
+++#define MT_WFDMA0_CTXD_CFG		MT_WFDMA0(0x2bc)
+++#define MT_WFDMA0_CTXD_CASCADE_NUM	GENMASK(15, 12)
+++#define MT_WFDMA0_CTXD_BAND1_RING	GENMASK(11, 7)
+++#define MT_WFDMA0_CTXD_BAND1_EN		BIT(6)
+++#define MT_WFDMA0_CTXD_BAND0_RING	GENMASK(5, 1)
+++#define MT_WFDMA0_CTXD_BAND0_EN		BIT(0)
+++
++ #define MT_WFDMA0_PRI_DLY_INT_CFG0	MT_WFDMA0(0x2f0)
++ #define MT_WFDMA0_PRI_DLY_INT_CFG1	MT_WFDMA0(0x2f4)
++ #define MT_WFDMA0_PRI_DLY_INT_CFG2	MT_WFDMA0(0x2f8)

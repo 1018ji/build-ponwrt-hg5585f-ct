@@ -18,6 +18,10 @@
     {
       "name": "0004-hg5585f-luci-and-build-cleanup.patch",
       "sha256": "ed58a884ca7e2d2739c9f7aa12fcced5d9259ae5ee6baf8f21cd0544f69d0bba"
+    },
+    {
+      "name": "0005-hg5585f-wifi-batch-and-queue-stats.patch",
+      "sha256": "b67f784754c980bbec310e1574666eedf499e8f484669198eb7014401b4dc014"
     }
   ],
   "files": {
@@ -108,7 +112,7 @@
       "executable": false
     },
     "package/kernel/mt76/Makefile": {
-      "sha256": "592d182f87f9f5a30ce75b37f4a00ea7fb566eb8eff9ab7c4275bda1bba189cd",
+      "sha256": "e6e0f8367b16bb83597dfc9daadf4a13c34ac36a17e31ad41acc35650e56a45b",
       "executable": false,
       "reviewed": true
     },
@@ -173,7 +177,7 @@
       "reviewed": true
     },
     "files/usr/sbin/hg5585f-wifi-diag": {
-      "sha256": "c8b73456c0485866196a33206a07e30ed976a5db0b9f7ca281bdc33cec04f499",
+      "sha256": "54907f1f47ea05c36f8634361fa3d460e2c68f257524c7f9c11fd93e2f55bb2a",
       "executable": true,
       "reviewed": true
     },
@@ -326,6 +330,10 @@
     "target/linux/airoha/base-files/etc/board.d/03_pon_data": {
       "sha256": "81d968a311069fdc4b2e6697d5f55d9aa33c8ba16f35c12e096db2ebfe697c6a",
       "executable": true
+    },
+    "package/kernel/mt76/patches/131-mt7915-airoha-batch-and-queue-stats.patch": {
+      "executable": false,
+      "sha256": "fc5344a6ef082e2841ce844a60c366c26823b8dc63b7492a426e9f97a522c5b4"
     }
   },
   "feeds": {
