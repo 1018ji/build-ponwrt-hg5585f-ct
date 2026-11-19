@@ -178,12 +178,6 @@ def main():
     args = parser.parse_args()
     if args.operation in ('config', 'kernel'):
         config(args.path, args.operation == 'kernel')
-        if args.operation == 'config':
-            for name, expected in manifest()['feeds'].items():
-                feed = args.path.resolve().parent/'feeds'/name
-                actual = run('git', 'rev-parse', 'HEAD', cwd=feed, capture=True).stdout.strip()
-                assert actual == expected['commit'], f'Feed revision changed: {name}'
-            print('PASS: all hardware and LuCI feed revisions pinned')
         return
     data = manifest()
     if args.operation == 'clone':

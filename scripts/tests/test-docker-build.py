@@ -33,9 +33,15 @@ class DockerBuild(unittest.TestCase):
         self.git(feed, 'init', '-q')
         self.git(feed, '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
                  'commit', '--allow-empty', '-qm', 'feed')
-        feed_commit = self.git(feed, 'rev-parse', 'HEAD').stdout.strip()
+        npu = self.root/'npu-upstream'
+        npu.mkdir()
+        self.git(npu, 'init', '-q')
+        self.write(npu/'Makefile', 'fixture\n')
+        self.git(npu, 'add', 'Makefile')
+        self.git(npu, '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
+                 'commit', '-qm', 'npu')
         self.write(self.recipe/'source.json', json.dumps({
-            'feeds': {'packages': {'commit': feed_commit}},
+            'vendored_sources': {'luci-app-airoha-npu': {'url': str(npu)}},
         }))
         self.write(self.recipe/'scripts/prepare.py', """import os,shutil,sys
 from pathlib import Path
@@ -126,15 +132,21 @@ if sys.argv[1] == 'update':
         self.assertIn(self.commit, (self.output/'steps.log').read_text())
         self.assertNotIn('target', {p.name for p in self.run_root.iterdir()})
 
-    def test_retry_retains_source_and_pinned_feeds(self):
+    def test_retry_retains_source_and_updates_feeds(self):
         stamp = self.cache.stat().st_mtime_ns
         for _ in range(2):
             result = self.build()
             self.assert_success(result)
-            self.assertIn('Reusing pinned package feeds', result.stdout)
             self.assertNotIn('START Clone pinned OpenWrt source', result.stdout)
         self.assertEqual(self.cache.stat().st_mtime_ns, stamp)
-        self.assertNotIn('update', (self.root/'feeds.log').read_text())
+        self.assertEqual((self.root/'feeds.log').read_text().count('update -a'), 2)
+
+    def test_latest_npu_app_is_fetched_each_build(self):
+        for _ in range(2):
+            self.assert_success(self.build())
+        app = self.source/'package/luci-app-airoha-npu'
+        self.assertEqual((app/'Makefile').read_text(), 'fixture\n')
+        self.assertFalse((app/'.git').exists())
 
     def test_recipe_snapshot_excludes_python_bytecode(self):
         self.write(self.recipe/'scripts/__pycache__/host.cpython-314.pyc', 'host cache')
@@ -150,12 +162,6 @@ if sys.argv[1] == 'update':
         self.assert_success(self.build())
         self.assert_success(self.build())
         self.assertEqual((self.root/'clones').read_text(), 'clone\n')
-
-    def test_missing_feed_is_updated_then_reused(self):
-        shutil.rmtree(self.source/'feeds/packages')
-        self.assert_success(self.build())
-        self.assert_success(self.build())
-        self.assertEqual((self.root/'feeds.log').read_text().count('update -a'), 1)
 
     def test_failed_validation_keeps_logs_and_compiled_image(self):
         self.write(self.output/'old.itb', 'stale')

@@ -4,7 +4,7 @@
   "patches": [
     {
       "name": "0001-hg5585f-platform.patch",
-      "sha256": "a87f281c12125c0a7fd770bf4947478aa8fb2babd56d81643a8b5cd15f96f36f"
+      "sha256": "a3ff83a8d49b33e4581ed5c0e24345c666a7c215942b67c894eca6bc2b8898f4"
     },
     {
       "name": "0002-hg5585f-offload.patch",
@@ -16,35 +16,16 @@
     },
     {
       "name": "0004-hg5585f-luci-and-build-cleanup.patch",
-      "sha256": "ed58a884ca7e2d2739c9f7aa12fcced5d9259ae5ee6baf8f21cd0544f69d0bba"
+      "sha256": "a56b954b8943c82f80737be5f4459072a567a3b688c3e84f9f02e11257bb1d95"
     },
     {
       "name": "0005-hg5585f-wifi-batch-and-queue-stats.patch",
       "sha256": "b67f784754c980bbec310e1574666eedf499e8f484669198eb7014401b4dc014"
     }
   ],
-  "feeds": {
-    "packages": {
-      "url": "https://github.com/immortalwrt/packages.git",
-      "commit": "decf94639ffd6ddd26591c190b547c6b7eea150b"
-    },
-    "luci": {
-      "url": "https://github.com/immortalwrt/luci.git",
-      "commit": "8724b54de3a760294aedeb10a29ffba7e44cca2f"
-    },
-    "pon_drivers": {
-      "url": "https://github.com/pbs05/openwrt-pon-drivers.git",
-      "commit": "47ad31349807099cf84c8ca9fb1a3f10120ef9ee"
-    },
-    "pon_userspace": {
-      "url": "https://github.com/pbs05/openwrt-pon-userspace.git",
-      "commit": "a903fcc80f4b89f9b9e59a02d3ba1fc5550819a5"
-    }
-  },
   "vendored_sources": {
     "luci-app-airoha-npu": {
-      "url": "https://github.com/luanmuc/luci-app-airoha-npu.git",
-      "commit": "5c6e9e079ad9ecb1446c674e964f797842675856"
+      "url": "https://github.com/luanmuc/luci-app-airoha-npu.git"
     }
   }
 }

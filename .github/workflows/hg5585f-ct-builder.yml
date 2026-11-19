@@ -78,6 +78,14 @@ jobs:
           key: hg5585f-dl-v1-${{ github.run_id }}
           restore-keys: hg5585f-dl-v1-
 
+      - name: Fetch latest luci-app-airoha-npu
+        working-directory: openwrt
+        run: |
+          url=$(python3 -c 'import json; print(json.load(open("'"$GITHUB_WORKSPACE"'/source.json"))["vendored_sources"]["luci-app-airoha-npu"]["url"])')
+          rm -rf package/luci-app-airoha-npu
+          git clone --depth=1 "$url" package/luci-app-airoha-npu
+          rm -rf package/luci-app-airoha-npu/.git
+
       - name: Update and install feeds
         working-directory: openwrt
         run: |

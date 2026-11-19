@@ -71,10 +71,10 @@ index d0be719..92f1de4 100644
 -#src-git targets https://github.com/openwrt/targets.git
 -#src-git oldpackages http://git.openwrt.org/packages.git
 -#src-link custom /usr/src/openwrt/custom-feed
-+src-git packages https://github.com/immortalwrt/packages.git^decf94639ffd6ddd26591c190b547c6b7eea150b
-+src-git luci https://github.com/immortalwrt/luci.git^a6adca3c8f91ecc7c43dd04d3c23b252135c6c53
-+src-git pon_drivers https://github.com/pbs05/openwrt-pon-drivers.git^2789b970a6bfcc5ee56cee699622201b8061b67c
-+src-git pon_userspace https://github.com/pbs05/openwrt-pon-userspace.git^cce9d756742487b378749c606b30e13ee9b0f093
++src-git packages https://github.com/immortalwrt/packages.git
++src-git luci https://github.com/immortalwrt/luci.git
++src-git pon_drivers https://github.com/pbs05/openwrt-pon-drivers.git
++src-git pon_userspace https://github.com/pbs05/openwrt-pon-userspace.git
 diff --git a/files/etc/Wireless/RT2860AP/SingleSKU.dat b/files/etc/Wireless/RT2860AP/SingleSKU.dat
 new file mode 100644
 index 0000000..d356536

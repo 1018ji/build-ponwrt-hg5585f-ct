@@ -139,30 +139,13 @@ else
   log 'INFO  Reusing existing OpenWrt configuration'
 fi
 step 'Merge HG5585F profile configuration' bash -o pipefail -c './scripts/kconfig.pl + .config configs/hg5585f-ct.config > .config.merged && mv .config.merged .config'
-if python3 - "$recipe/source.json" <<'PY'
-import json
-from pathlib import Path
-import subprocess
-import sys
-
-data = json.loads(Path(sys.argv[1]).read_text())
-for name, expected in data['feeds'].items():
-    path = Path('feeds') / name
-    if not path.is_dir():
-        raise SystemExit(1)
-    try:
-        actual = subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=path, text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        raise SystemExit(1)
-    if actual != expected['commit']:
-        raise SystemExit(1)
-PY
-then
-  log 'INFO  Reusing pinned package feeds'
-else
-  step 'Update pinned package feeds' bash -o pipefail -c './scripts/feeds update -a'
-fi
+step 'Fetch latest luci-app-airoha-npu' bash -euo pipefail -c '
+  url=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"vendored_sources\"][\"luci-app-airoha-npu\"][\"url\"])" "$recipe/source.json")
+  rm -rf package/luci-app-airoha-npu
+  git clone --depth=1 "$url" package/luci-app-airoha-npu
+  rm -rf package/luci-app-airoha-npu/.git
+'
+step 'Update package feeds to latest' bash -o pipefail -c './scripts/feeds update -a'
 step 'Install required hardware and LuCI feeds' bash -o pipefail -c './scripts/feeds install luci luci-theme-bootstrap luci-i18n-base-zh-cn luci-app-pon airoha-pon-debug airoha-ponctl airoha-pond kmod-airoha-xpon kmod-airoha-paged-bosa iperf3 pciutils htop zoneinfo-asia && sed -i "s#\$(TOPDIR)/feeds/luci/luci.mk#../../luci/luci.mk#" feeds/pon_userspace/luci-app-pon/Makefile'
 step 'Resolve final OpenWrt configuration' make defconfig
 step 'Verify generated OpenWrt configuration' python3 "$recipe/scripts/prepare.py" config .config
